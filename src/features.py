@@ -1,4 +1,3 @@
-
 import pandas as pd
 
 
@@ -6,12 +5,15 @@ def validate_data(
     df: pd.DataFrame,
     timestamp_col: str,
     target_col: str,
+    group_col=None,
 ) -> pd.DataFrame:
-    """Validate the minimum columns needed for time-series forecasting."""
+    """Validate and sort time-series data without mixing meters."""
 
     required = [timestamp_col, target_col]
-    missing = [col for col in required if col not in df.columns]
+    if group_col:
+        required.append(group_col)
 
+    missing = [col for col in required if col not in df.columns]
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
 
@@ -23,18 +25,27 @@ def validate_data(
         df[target_col], errors="coerce"
     )
 
-    df = df.dropna(subset=[timestamp_col, target_col])
-    df = df.sort_values(timestamp_col)
-    df = df.drop_duplicates(subset=[timestamp_col])
+    df = df.dropna(subset=required)
 
-    return df.reset_index(drop=True)
+    duplicate_cols = (
+        [group_col, timestamp_col] if group_col else [timestamp_col]
+    )
+    if df.duplicated(duplicate_cols).any():
+        raise ValueError(
+            f"Duplicate observations found for {duplicate_cols}"
+        )
+
+    sort_cols = (
+        [group_col, timestamp_col] if group_col else [timestamp_col]
+    )
+    return df.sort_values(sort_cols).reset_index(drop=True)
 
 
 def add_time_features(
     df: pd.DataFrame,
     timestamp_col: str,
 ) -> pd.DataFrame:
-    """Create general calendar features from a timestamp."""
+    """Create calendar features from a timestamp."""
 
     df = df.copy()
     timestamp = df[timestamp_col]
@@ -52,17 +63,65 @@ def add_time_features(
 def add_history_features(
     df: pd.DataFrame,
     target_col: str,
+    group_col=None,
 ) -> pd.DataFrame:
-    """Create features using only previous observations."""
+    """Create lag and rolling features using past observations only."""
 
     df = df.copy()
 
-    df["lag_1"] = df[target_col].shift(1)
-    df["lag_2"] = df[target_col].shift(2)
-
-    # Shift before rolling so the current value is excluded.
-    df["rolling_mean_3"] = (
-        df[target_col].shift(1).rolling(3).mean()
-    )
+    if group_col:
+        grouped = df.groupby(group_col, sort=False)[target_col]
+        df["lag_1"] = grouped.shift(1)
+        df["lag_2"] = grouped.shift(2)
+        df["rolling_mean_3"] = grouped.transform(
+            lambda values: values.shift(1).rolling(3).mean()
+        )
+    else:
+        df["lag_1"] = df[target_col].shift(1)
+        df["lag_2"] = df[target_col].shift(2)
+        df["rolling_mean_3"] = (
+            df[target_col].shift(1).rolling(3).mean()
+        )
 
     return df
+
+
+def chronological_split(
+    df: pd.DataFrame,
+    timestamp_col: str,
+    train_ratio: float = 0.70,
+    validation_ratio: float = 0.15,
+):
+    """Split by shared timestamps, keeping all meters at each time together."""
+
+    if not 0 < train_ratio < 1:
+        raise ValueError("train_ratio must be between 0 and 1")
+    if not 0 < validation_ratio < 1:
+        raise ValueError("validation_ratio must be between 0 and 1")
+    if train_ratio + validation_ratio >= 1:
+        raise ValueError(
+            "Training and validation ratios must sum to less than 1"
+        )
+
+    df = df.sort_values(timestamp_col).reset_index(drop=True)
+    timestamps = sorted(df[timestamp_col].dropna().unique())
+
+    if len(timestamps) < 3:
+        raise ValueError("Not enough unique timestamps to split data")
+
+    train_end = int(len(timestamps) * train_ratio)
+    validation_end = int(
+        len(timestamps) * (train_ratio + validation_ratio)
+    )
+
+    train_boundary = timestamps[train_end]
+    validation_boundary = timestamps[validation_end]
+
+    train_df = df[df[timestamp_col] < train_boundary].copy()
+    validation_df = df[
+        (df[timestamp_col] >= train_boundary)
+        & (df[timestamp_col] < validation_boundary)
+    ].copy()
+    test_df = df[df[timestamp_col] >= validation_boundary].copy()
+
+    return train_df, validation_df, test_df
