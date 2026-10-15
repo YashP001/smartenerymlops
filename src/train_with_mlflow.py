@@ -1,5 +1,6 @@
 import mlflow
-import mlflow.sklearn`r`nfrom mlflow.models import infer_signature
+import mlflow.sklearn
+from mlflow.models import infer_signature
 import pandas as pd
 
 from sklearn.base import clone
@@ -104,10 +105,15 @@ def main():
                         mlflow.log_param(key, value)
 
             mlflow.log_metrics(metrics)
+            input_example = X_train.head(5)
+            signature = infer_signature(
+                input_example, fitted.predict(input_example)
+            )
             mlflow.sklearn.log_model(
                 fitted,
                 artifact_path="model",
-                input_example=X_train.head(5),
+                input_example=input_example,
+                signature=signature,
             )
             results.append({"Model": name, **metrics})
 
