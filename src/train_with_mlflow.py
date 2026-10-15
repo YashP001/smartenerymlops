@@ -1,5 +1,5 @@
 import mlflow
-import mlflow.sklearn
+import mlflow.sklearn`r`nfrom mlflow.models import infer_signature
 import pandas as pd
 
 from sklearn.base import clone

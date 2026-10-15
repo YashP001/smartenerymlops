@@ -45,7 +45,7 @@ The script does not set a tracking URI explicitly; MLflow uses the environment's
 
 ### Input signature and schema warning review
 
-The model logging call passes `X_train.head(5)` as an input example. This gives MLflow example inputs with the six feature columns, but the script does not explicitly create and pass a model signature. The exact warning text was not available in the reviewed files, so its specific cause and whether it remains after the successful run cannot be confirmed. The warning should be checked against the MLflow version and full run output. If it concerns a missing or mismatched signature, log an explicit signature generated from the same six-column input frame and model predictions, and check that a loaded model accepts the expected column names and types. This report does not claim the warning has been resolved.
+The model logging call passes the first five training rows as an input example and now explicitly infers and logs a signature from those six feature columns and the fitted model predictions. This makes the expected input and output schema part of the artifact. The exact warning text was not available in the reviewed files, and the experiment was not rerun after this code change, so the warning resolution is not confirmed. Check the full warning output and verify that a loaded model accepts the expected column names and types.
 
 MLflow improves development reproducibility by keeping parameters, validation metrics, and model artifacts together by run. It does not by itself mean that the model has been registered, served, deployed, or monitored in production.
 
