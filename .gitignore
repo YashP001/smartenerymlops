@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.venv311/
+
+# macOS
+.DS_Store
+
+# MLflow local tracking
+mlruns/
+
+# Generated datasets - manage separately with DVC
+data/*.csv
+
+# Temporary files
+*.log
