@@ -1,5 +1,39 @@
-import pandas as pd
+"""
+Shared feature engineering utilities for training and inference.
 
+This module defines the canonical feature columns used by the trained
+model, provides training-time feature construction functions, and
+inference-time input validation.
+
+Used by:
+  - src/predict.py          (inference)
+  - api/main.py             (API input schema)
+  - tests/test_features.py  (automated tests)
+"""
+
+import os
+import pandas as pd
+import numpy as np
+
+# ─── Canonical feature and target definitions ────────────────────────
+# These must match exactly what the trained model expects.
+
+FEATURE_COLUMNS = [
+    "energy_current_hour",
+    "energy_previous_hour",
+    "energy_two_hours_ago",
+    "target_hour",
+    "target_day_of_week",
+    "target_is_weekend",
+]
+
+TARGET_COLUMN = "target_next_hour"
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_PATH = os.path.join(_PROJECT_ROOT, "models", "gradient_boosting.pkl")
+
+
+# ─── Data validation (training pipeline) ─────────────────────────────
 
 def validate_data(
     df: pd.DataFrame,
@@ -41,20 +75,26 @@ def validate_data(
     return df.sort_values(sort_cols).reset_index(drop=True)
 
 
+# ─── Feature construction (training pipeline) ────────────────────────
+
 def add_time_features(
     df: pd.DataFrame,
     timestamp_col: str,
+    offset_hours: int = 1,
 ) -> pd.DataFrame:
-    """Create calendar features from a timestamp."""
+    """Create calendar features for the target prediction hour.
+
+    Features describe the hour being predicted, which is
+    ``offset_hours`` ahead of the current timestamp.
+    """
 
     df = df.copy()
-    timestamp = df[timestamp_col]
+    target_time = df[timestamp_col] + pd.Timedelta(hours=offset_hours)
 
-    df["hour"] = timestamp.dt.hour
-    df["day_of_week"] = timestamp.dt.dayofweek
-    df["month"] = timestamp.dt.month
-    df["is_weekend"] = (
-        timestamp.dt.dayofweek >= 5
+    df["target_hour"] = target_time.dt.hour
+    df["target_day_of_week"] = target_time.dt.dayofweek
+    df["target_is_weekend"] = (
+        target_time.dt.dayofweek >= 5
     ).astype(int)
 
     return df
@@ -65,23 +105,19 @@ def add_history_features(
     target_col: str,
     group_col=None,
 ) -> pd.DataFrame:
-    """Create lag and rolling features using past observations only."""
+    """Create energy history features using past observations only."""
 
     df = df.copy()
 
     if group_col:
         grouped = df.groupby(group_col, sort=False)[target_col]
-        df["lag_1"] = grouped.shift(1)
-        df["lag_2"] = grouped.shift(2)
-        df["rolling_mean_3"] = grouped.transform(
-            lambda values: values.shift(1).rolling(3).mean()
-        )
+        df["energy_current_hour"] = grouped.shift(0)
+        df["energy_previous_hour"] = grouped.shift(1)
+        df["energy_two_hours_ago"] = grouped.shift(2)
     else:
-        df["lag_1"] = df[target_col].shift(1)
-        df["lag_2"] = df[target_col].shift(2)
-        df["rolling_mean_3"] = (
-            df[target_col].shift(1).rolling(3).mean()
-        )
+        df["energy_current_hour"] = df[target_col]
+        df["energy_previous_hour"] = df[target_col].shift(1)
+        df["energy_two_hours_ago"] = df[target_col].shift(2)
 
     return df
 
@@ -125,3 +161,67 @@ def chronological_split(
     test_df = df[df[timestamp_col] >= validation_boundary].copy()
 
     return train_df, validation_df, test_df
+
+
+# ─── Inference utilities ─────────────────────────────────────────────
+
+def validate_inference_input(data: dict) -> dict:
+    """Validate and clean a single prediction input.
+
+    Args:
+        data: Dictionary with keys matching FEATURE_COLUMNS.
+
+    Returns:
+        Cleaned dictionary ready for feature vector preparation.
+
+    Raises:
+        ValueError: If required features are missing or invalid.
+    """
+    missing = [col for col in FEATURE_COLUMNS if col not in data]
+    if missing:
+        raise ValueError(f"Missing required features: {missing}")
+
+    cleaned = {}
+    for col in FEATURE_COLUMNS:
+        value = data[col]
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            raise ValueError(f"Feature '{col}' cannot be null or NaN")
+
+        try:
+            cleaned[col] = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Feature '{col}' must be numeric, got: {type(value).__name__}"
+            )
+
+    # Range validation for calendar features.
+    if not (0 <= cleaned["target_hour"] <= 23):
+        raise ValueError("target_hour must be between 0 and 23")
+    if not (0 <= cleaned["target_day_of_week"] <= 6):
+        raise ValueError("target_day_of_week must be between 0 and 6")
+    if cleaned["target_is_weekend"] not in (0.0, 1.0):
+        raise ValueError("target_is_weekend must be 0 or 1")
+
+    # Energy values should be non-negative.
+    for col in [
+        "energy_current_hour",
+        "energy_previous_hour",
+        "energy_two_hours_ago",
+    ]:
+        if cleaned[col] < 0:
+            raise ValueError(f"{col} must be non-negative")
+
+    return cleaned
+
+
+def prepare_feature_vector(data: dict) -> pd.DataFrame:
+    """Convert validated input to a model-ready DataFrame.
+
+    Args:
+        data: Dictionary with keys matching FEATURE_COLUMNS
+              (already validated).
+
+    Returns:
+        Single-row DataFrame with columns in the correct order.
+    """
+    return pd.DataFrame([{col: data[col] for col in FEATURE_COLUMNS}])

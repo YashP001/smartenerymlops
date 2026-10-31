@@ -4,6 +4,12 @@ matplotlib
 seaborn
 scikit-learn
 jupyter
-dvc
+dvc[gdrive]
 mlflow
 pytest
+fastapi
+uvicorn[standard]
+httpx
+wandb
+joblib
+pydantic

@@ -1,0 +1,254 @@
+{
+  "metadata": {
+    "timestamp": "2026-10-31T20:39:23.226243",
+    "total_rows": 550560,
+    "total_columns": 6,
+    "columns": [
+      "x_Timestamp",
+      "t_kWh",
+      "z_Avg Voltage (Volt)",
+      "z_Avg Current (Amp)",
+      "y_Freq (Hz)",
+      "meter"
+    ]
+  },
+  "status": {
+    "all_passed": false,
+    "has_critical_errors": false,
+    "has_anomalies": true
+  },
+  "checks": {
+    "schema_and_types": {
+      "required_columns": [
+        "x_Timestamp",
+        "t_kWh",
+        "z_Avg Voltage (Volt)",
+        "z_Avg Current (Amp)",
+        "y_Freq (Hz)",
+        "meter"
+      ],
+      "actual_columns": [
+        "x_Timestamp",
+        "t_kWh",
+        "z_Avg Voltage (Volt)",
+        "z_Avg Current (Amp)",
+        "y_Freq (Hz)",
+        "meter"
+      ],
+      "missing_columns": [],
+      "unexpected_columns": [],
+      "column_types": {
+        "x_Timestamp": "object",
+        "t_kWh": "float64",
+        "z_Avg Voltage (Volt)": "float64",
+        "z_Avg Current (Amp)": "float64",
+        "y_Freq (Hz)": "float64",
+        "meter": "object"
+      },
+      "type_issues": {},
+      "passed": true
+    },
+    "missing_values": {
+      "total_rows": 550560,
+      "total_missing": 0,
+      "per_column": {},
+      "passed": true
+    },
+    "duplicate_records": {
+      "total_rows": 550560,
+      "total_duplicates": 0,
+      "percentage": 0.0,
+      "passed": true
+    },
+    "duplicate_meter_timestamps": {
+      "subset_columns": [
+        "meter",
+        "x_Timestamp"
+      ],
+      "total_duplicates": 0,
+      "sample_duplicates": [],
+      "passed": true
+    },
+    "timestamp_validity": {
+      "total_rows": 550560,
+      "unparseable_count": 0,
+      "min_timestamp": "2021-01-01 00:00:00",
+      "max_timestamp": "2021-02-20 23:57:00",
+      "timespan_days": 51.0,
+      "out_of_bounds_years": 0,
+      "passed": true
+    },
+    "timestamp_intervals": {
+      "expected_interval_minutes": 3,
+      "total_intervals_checked": 550525,
+      "exact_expected_intervals": 550264,
+      "unexpected_gaps_count": 261,
+      "short_intervals_count": 0,
+      "negative_intervals_count": 0,
+      "total_estimated_missing_readings": 254400,
+      "largest_gap": "29 days 00:03:00",
+      "smallest_gap": "0 days 00:03:00",
+      "top_5_largest_gaps": [
+        {
+          "meter": "MH41",
+          "timestamp": "2021-02-14 00:00:00",
+          "gap_duration": "29 days 00:03:00",
+          "estimated_missing_readings": 13920
+        },
+        {
+          "meter": "MH26",
+          "timestamp": "2021-02-09 00:00:00",
+          "gap_duration": "9 days 00:03:00",
+          "estimated_missing_readings": 4320
+        },
+        {
+          "meter": "MH20",
+          "timestamp": "2021-01-17 00:00:00",
+          "gap_duration": "8 days 00:03:00",
+          "estimated_missing_readings": 3840
+        },
+        {
+          "meter": "MH33",
+          "timestamp": "2021-01-24 00:00:00",
+          "gap_duration": "8 days 00:03:00",
+          "estimated_missing_readings": 3840
+        },
+        {
+          "meter": "MH34",
+          "timestamp": "2021-02-03 00:00:00",
+          "gap_duration": "8 days 00:03:00",
+          "estimated_missing_readings": 3840
+        }
+      ],
+      "passed": false
+    },
+    "invalid_numerical_values": {
+      "total_invalid_values": 0,
+      "invalid_details": {},
+      "passed": true
+    },
+    "suspicious_values_and_anomalies": {
+      "total_anomalies": 661,
+      "anomalies": {
+        "zero_voltage_with_consumption": {
+          "count": 45,
+          "description": "Readings where voltage is 0.0V but consumption t_kWh > 0",
+          "is_anomaly": true
+        },
+        "zero_frequency_with_consumption": {
+          "count": 45,
+          "description": "Readings where grid frequency is 0.0Hz but consumption t_kWh > 0",
+          "is_anomaly": true
+        },
+        "zero_current_with_consumption": {
+          "count": 215,
+          "description": "Readings where current is 0.0A but consumption t_kWh > 0",
+          "is_anomaly": true
+        },
+        "overvoltage_spikes": {
+          "count": 132,
+          "threshold": "> 300.0V",
+          "description": "Readings with line voltage exceeding 300.0V",
+          "is_anomaly": true
+        },
+        "brownout_undervoltage": {
+          "count": 212,
+          "threshold": "0V < V < 150.0V",
+          "description": "Readings with brownout voltage between 0V and 150.0V",
+          "is_anomaly": true
+        },
+        "zero_voltage_outages": {
+          "count": 66595,
+          "description": "Total readings with voltage = 0.0V (indicates power outages / offline)",
+          "is_anomaly": false
+        },
+        "frequency_overfrequency": {
+          "count": 8,
+          "threshold": "> 55.0Hz",
+          "description": "Readings with frequency exceeding 55.0Hz",
+          "is_anomaly": true
+        },
+        "frequency_underfrequency": {
+          "count": 4,
+          "threshold": "0Hz < F < 45.0Hz",
+          "description": "Readings with non-zero frequency below 45.0Hz",
+          "is_anomaly": true
+        },
+        "energy_consumption_spikes": {
+          "count": 0,
+          "threshold": "> 2.5 kWh / 3min",
+          "description": "Readings where 3-minute energy exceeds 2.5 kWh",
+          "is_anomaly": false
+        }
+      },
+      "passed": false
+    }
+  },
+  "statistics": {
+    "feature_statistics": {
+      "t_kWh": {
+        "count": 550560,
+        "mean": 0.0069,
+        "std": 0.0138,
+        "min": 0.0,
+        "p25": 0.001,
+        "median": 0.003,
+        "p75": 0.008,
+        "p95": 0.018,
+        "p99": 0.085,
+        "max": 0.232,
+        "zero_count": 114476,
+        "zero_percentage": 20.79
+      },
+      "z_Avg Voltage (Volt)": {
+        "count": 550560,
+        "mean": 223.7199,
+        "std": 83.8543,
+        "min": 0.0,
+        "p25": 242.65,
+        "median": 253.89,
+        "p75": 261.57,
+        "p95": 271.45,
+        "p99": 276.74,
+        "max": 654.73,
+        "zero_count": 66595,
+        "zero_percentage": 12.1
+      },
+      "z_Avg Current (Amp)": {
+        "count": 550560,
+        "mean": 0.708,
+        "std": 1.1921,
+        "min": 0.0,
+        "p25": 0.09,
+        "median": 0.37,
+        "p75": 0.89,
+        "p95": 2.07,
+        "p99": 7.0,
+        "max": 18.29,
+        "zero_count": 79572,
+        "zero_percentage": 14.45
+      },
+      "y_Freq (Hz)": {
+        "count": 550560,
+        "mean": 43.9553,
+        "std": 16.3054,
+        "min": 0.0,
+        "p25": 49.94,
+        "median": 50.0,
+        "p75": 50.04,
+        "p95": 50.08,
+        "p99": 50.13,
+        "max": 74.76,
+        "zero_count": 66595,
+        "zero_percentage": 12.1
+      }
+    },
+    "meter_summary": {
+      "unique_meters": 35,
+      "total_records": 550560,
+      "min_readings_per_meter": 6240,
+      "max_readings_per_meter": 24000,
+      "mean_readings_per_meter": 15730.3
+    }
+  }
+}

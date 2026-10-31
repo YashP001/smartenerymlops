@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import joblib
 
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -39,4 +40,7 @@ output = test[["meter", "hour", TARGET]].copy()
 output["predicted_next_hour"] = predictions
 output.to_csv("reports/test_predictions.csv", index=False)
 
-print("\nSaved predictions to reports/test_predictions.csv")
+# Save the trained model for inference.
+joblib.dump(model, "models/gradient_boosting.pkl")
+print("\nSaved model to models/gradient_boosting.pkl")
+print("Saved predictions to reports/test_predictions.csv")
