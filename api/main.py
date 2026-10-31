@@ -39,17 +39,23 @@ app = FastAPI(
 
 model = None
 
+try:
+    model = load_model()
+except FileNotFoundError:
+    pass
+
 
 @app.on_event("startup")
 def startup_event():
     """Load the trained model when the application starts."""
     global model
-    try:
-        model = load_model()
-        print("Model loaded successfully.")
-    except FileNotFoundError as e:
-        print(f"Warning: {e}")
-        print("The /predict endpoint will return 503 until a model is available.")
+    if model is None:
+        try:
+            model = load_model()
+            print("Model loaded successfully.")
+        except FileNotFoundError as e:
+            print(f"Warning: {e}")
+            print("The /predict endpoint will return 503 until a model is available.")
 
 
 # ─── Request / response schemas ──────────────────────────────────────

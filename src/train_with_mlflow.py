@@ -114,6 +114,7 @@ def main():
                 artifact_path="model",
                 input_example=input_example,
                 signature=signature,
+                serialization_format="cloudpickle",
             )
             results.append({"Model": name, **metrics})
 

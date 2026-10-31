@@ -11,6 +11,14 @@ __pycache__/
 
 # MLflow local experiment artifacts
 mlruns/
+mlflow.db
+
+# Weights & Biases
+wandb/
+
+# Generated pipeline data files (raw tracked via DVC)
+data/*.csv
+data/processed/*.csv
 
 # Secrets
 .env

@@ -92,6 +92,9 @@ def track_experiments(
         try:
             import wandb
 
+            if not os.environ.get("WANDB_API_KEY") and "WANDB_MODE" not in os.environ:
+                os.environ["WANDB_MODE"] = "offline"
+
             wandb_run = wandb.init(
                 project=experiment_name,
                 name="model-comparison",
@@ -99,6 +102,9 @@ def track_experiments(
             )
         except ImportError:
             print("Warning: wandb not installed. Skipping W&B logging.")
+            use_wandb = False
+        except Exception as e:
+            print(f"Warning: W&B initialization failed ({e}). Skipping W&B logging.")
             use_wandb = False
 
     mlflow.set_experiment(experiment_name)
@@ -152,6 +158,7 @@ def track_experiments(
                 artifact_path="model",
                 input_example=input_example,
                 signature=signature,
+                serialization_format="cloudpickle",
             )
 
             if use_wandb:
@@ -191,10 +198,11 @@ if __name__ == "__main__":
         print("Run the data pipeline first (split_data.py).")
         exit(1)
 
-    # Set use_wandb=True to also log to Weights & Biases.
+    # Set use_wandb=True to also log to Weights & Biases (offline or online).
     results = track_experiments(
-        train, validation, use_wandb=False
+        train, validation, use_wandb=True
     )
 
+    os.makedirs("reports", exist_ok=True)
     results.to_csv("reports/validation_results.csv", index=False)
     print("\nSaved results to reports/validation_results.csv")

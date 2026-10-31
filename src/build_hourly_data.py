@@ -1,6 +1,11 @@
+import os
 import pandas as pd
 
-RAW_PATH = "data/SM Cleaned Data MH2021.csv"
+RAW_PATH = (
+    "data/raw/SM Cleaned Data MH2021.csv"
+    if os.path.exists("data/raw/SM Cleaned Data MH2021.csv")
+    else "data/SM Cleaned Data MH2021.csv"
+)
 OUTPUT_PATH = "data/hourly_energy.csv"
 
 df = pd.read_csv(
