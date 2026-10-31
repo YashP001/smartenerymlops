@@ -118,19 +118,30 @@ Following model selection on validation data, the winning **Gradient Boosting Re
 
 ---
 
-## MLflow Experiment Tracking
+## MLflow & Weights & Biases Experiment Tracking
 
-The project uses MLflow for reproducible experiment management:
-- **Experiment Name:** `smart-home-energy-advisor`
+The project uses MLflow for model registry and tracking, and Weights & Biases (W&B) for interactive dashboards:
+- **MLflow Experiment Name:** `smart-home-energy-advisor` (stored in persistent SQLite DB `mlflow.db`)
 - **Logged Parameters:** Model type, feature count, target column, and scikit-learn hyperparameters via `get_params()`.
 - **Logged Metrics:** Validation MAE, RMSE, and $R^2$.
-- **Model Signatures & Artifacts:** Logged with explicit input/output schemas (`infer_signature`) and input examples.
+- **Model Signatures & Artifacts:** Logged with explicit input/output schemas (`infer_signature`) and cloudpickle serialization.
+- **Model Registry:** Best run (`GradientBoostingRegressor`) registered under `smart-home-energy-advisor` (Version 1) with idempotency protection.
 
-To view the tracking dashboard locally:
+### Viewing MLflow Locally
 ```bash
-mlflow ui
+mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
-Navigate to `http://127.0.0.1:5000` to inspect experiment runs, comparative metric charts, and logged model artifacts.
+Navigate to `http://127.0.0.1:5000` to inspect experiment runs, comparative metric charts, registered models, and logged model artifacts.
+
+### Synchronizing Weights & Biases (W&B) Dashboard
+When running without an active W&B login, experiments are recorded in offline mode (`wandb/offline-run-...`). To sync your runs to the cloud:
+1. Log in to [https://wandb.ai/authorize](https://wandb.ai/authorize) to get your API key.
+2. Authenticate in your terminal: `wandb login` (or set `$env:WANDB_API_KEY="..."`).
+3. Push offline runs to your W&B project:
+   ```bash
+   wandb sync wandb/offline-run-20261031_230321-rugud7li
+   ```
+4. Access the comparative run dashboards and `model_comparison` tables on your W&B dashboard.
 
 ---
 

@@ -138,3 +138,39 @@ class TestModelRegistry:
         pred = model.predict(sample_input)
         assert len(pred) == 1
         assert float(pred[0]) >= 0.0
+
+    def test_register_best_model_idempotent(self):
+        """Calling register_best_model multiple times for the same run reuses version."""
+        v_first = register_best_model("smart-home-energy-advisor", "smart-home-energy-advisor")
+        v_second = register_best_model("smart-home-energy-advisor", "smart-home-energy-advisor")
+        assert v_first is not None and v_second is not None
+        assert str(v_first.version) == str(v_second.version) == "1"
+
+    def test_register_different_candidate_creates_new_version(self):
+        """Registering a genuinely different candidate run creates a new version."""
+        client = mlflow.tracking.MlflowClient()
+        test_model = "test-model-candidate-switch"
+        run_gb = "e9922ecbb3af4c029aebf2f19b755694"
+        run_rf = "88bbd825d67c474da7c1b071591d559c"
+
+        try:
+            # Register candidate 1
+            v1 = register_best_model(run_id=run_gb, model_name=test_model)
+            assert str(v1.version) == "1"
+
+            # Repeat candidate 1 (must be idempotent)
+            v1_repeat = register_best_model(run_id=run_gb, model_name=test_model)
+            assert str(v1_repeat.version) == "1"
+
+            # Register candidate 2 (genuinely different run)
+            v2 = register_best_model(run_id=run_rf, model_name=test_model)
+            assert str(v2.version) == "2"
+
+            # Verify version 1 was preserved without modification
+            v1_check = client.get_model_version(test_model, "1")
+            assert v1_check.run_id == run_gb
+        finally:
+            try:
+                client.delete_registered_model(test_model)
+            except Exception:
+                pass

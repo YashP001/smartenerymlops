@@ -63,10 +63,39 @@ After refitting on training + validation data:
 
 ## Experiment Tracking
 
-- **MLflow experiment:** `smart-home-energy-advisor`
-- All model parameters, metrics, and artifacts logged per run.
-- Selected model registered in MLflow Model Registry.
-- W&B dashboards available for interactive metric comparison.
+- **MLflow experiment:** `smart-home-energy-advisor` (stored in persistent SQLite DB `mlflow.db`).
+- All model parameters, metrics, signatures, and artifacts logged per run.
+- Selected model registered in MLflow Model Registry (`smart-home-energy-advisor` Version 1) with idempotency protection.
+- W&B dashboards available for interactive metric comparison and model evaluation tables.
+
+### Weights & Biases (W&B) Cloud Synchronization
+
+When training runs without a configured `WANDB_API_KEY`, W&B executes in **offline mode** (`WANDB_MODE=offline`) and saves all run data, metrics, and evaluation tables locally under `wandb/offline-run-<timestamp>-<id>`.
+
+To synchronize local offline runs to your personal online W&B project:
+
+1. **Obtain your W&B API Key:**
+   - Log in to [Weights & Biases](https://wandb.ai) and retrieve your API key from [https://wandb.ai/authorize](https://wandb.ai/authorize).
+
+2. **Authenticate locally (never commit your API key):**
+   ```bash
+   wandb login
+   ```
+   *Alternatively, set the environment variable for your local shell session only:*
+   - **PowerShell:** `$env:WANDB_API_KEY="your_api_key_here"`
+   - **Bash:** `export WANDB_API_KEY="your_api_key_here"`
+
+3. **Synchronize the offline experiment run:**
+   ```bash
+   # Sync a specific run:
+   wandb sync wandb/offline-run-20261031_230321-rugud7li
+
+   # Or sync all offline runs:
+   wandb sync --include-offline wandb/
+   ```
+
+4. **Inspect your online dashboard:**
+   - Navigate to `https://wandb.ai/<your-username>/smart-home-energy-advisor` to inspect the comparative validation metrics (MAE, RMSE, $R^2$) and the `model_comparison` summary table.
 
 ## Limitations
 

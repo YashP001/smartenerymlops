@@ -51,34 +51,61 @@ def register_best_model(
     experiment_name: str = "smart-home-energy-advisor",
     model_name: str = "smart-home-energy-advisor",
     metric: str = "MAE",
+    run_id: str = None,
 ):
     """Register the best model from experiments into the MLflow
-    Model Registry.
+    Model Registry with idempotency protection.
+
+    If the candidate run is already registered under model_name,
+    its existing ModelVersion is reused instead of creating a duplicate.
+    If a genuinely new run is provided or selected, a new version is created.
 
     Args:
         experiment_name: Name of the MLflow experiment.
         model_name: Name under which to register the model.
         metric: Metric used to select the best run.
+        run_id: Optional specific MLflow run ID to register. If None,
+            selects best run by metric.
 
     Returns:
         The registered ModelVersion object, or None on failure.
     """
-    best_run = get_best_run(experiment_name, metric)
+    client = MlflowClient()
+
+    if run_id:
+        best_run = client.get_run(run_id)
+    else:
+        best_run = get_best_run(experiment_name, metric)
+
     if best_run is None:
         return None
 
-    run_id = best_run.info.run_id
-    model_uri = f"runs:/{run_id}/model"
+    target_run_id = best_run.info.run_id
+    model_uri = f"runs:/{target_run_id}/model"
 
-    print(f"Best run: {run_id}")
+    print(f"Target run: {target_run_id}")
     print(f"  Model type: {best_run.data.params.get('model_type')}")
     print(f"  MAE: {best_run.data.metrics.get('MAE'):.4f}")
     print(f"  RMSE: {best_run.data.metrics.get('RMSE'):.4f}")
     print(f"  R2: {best_run.data.metrics.get('R2'):.4f}")
 
-    # Register the model.
+    # Check existing registered model versions for idempotency
+    try:
+        existing_versions = client.search_model_versions(f"name = '{model_name}'")
+        for v in existing_versions:
+            if v.run_id == target_run_id or (v.source and target_run_id in v.source):
+                print(
+                    f"\nRun '{target_run_id}' is already registered as '{model_name}' "
+                    f"version {v.version}."
+                )
+                print("Reusing existing registered model version (idempotent).")
+                return v
+    except Exception as e:
+        print(f"Checking existing model versions: {e}")
+
+    # Register genuinely new model version without deleting previous versions
     result = mlflow.register_model(model_uri, model_name)
-    print(f"\nRegistered model: {model_name}")
+    print(f"\nRegistered new model version: {model_name}")
     print(f"  Version: {result.version}")
 
     return result
