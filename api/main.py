@@ -17,11 +17,53 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from src.predict import load_model, predict
 from src.features import FEATURE_COLUMNS
+
+# ─── Model lifecycle & Lifespan ──────────────────────────────────────
+
+model = None
+
+
+def get_active_model():
+    """Retrieve the model from application state, loading once if uninitialized."""
+    global model
+    active = getattr(app.state, "model", None)
+    if active is not None:
+        return active
+    if model is not None:
+        app.state.model = model
+        return model
+    try:
+        loaded = load_model()
+        app.state.model = loaded
+        model = loaded
+        return loaded
+    except Exception:
+        return None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle: load model once at startup into app.state."""
+    global model
+    try:
+        loaded = load_model()
+        app.state.model = loaded
+        model = loaded
+        print("Model loaded successfully into application state.")
+    except Exception as e:
+        print(f"Startup Warning: Failed to load model ({e}).")
+        app.state.model = None
+        model = None
+    yield
+    app.state.model = None
+    model = None
+
 
 # ─── FastAPI application ─────────────────────────────────────────────
 
@@ -33,29 +75,8 @@ app = FastAPI(
         "CEEW Mathura 2021 data."
     ),
     version="1.0.0",
+    lifespan=lifespan,
 )
-
-# ─── Model lifecycle ─────────────────────────────────────────────────
-
-model = None
-
-try:
-    model = load_model()
-except FileNotFoundError:
-    pass
-
-
-@app.on_event("startup")
-def startup_event():
-    """Load the trained model when the application starts."""
-    global model
-    if model is None:
-        try:
-            model = load_model()
-            print("Model loaded successfully.")
-        except FileNotFoundError as e:
-            print(f"Warning: {e}")
-            print("The /predict endpoint will return 503 until a model is available.")
 
 
 # ─── Request / response schemas ──────────────────────────────────────
@@ -135,9 +156,10 @@ class HealthResponse(BaseModel):
 @app.get("/health", response_model=HealthResponse)
 def health_check():
     """Check if the service is healthy and the model is loaded."""
+    active_model = get_active_model()
     return HealthResponse(
         status="healthy",
-        model_loaded=model is not None,
+        model_loaded=active_model is not None,
     )
 
 
@@ -148,7 +170,8 @@ def make_prediction(input_data: PredictionInput):
     Accepts the six input features used by the trained Gradient
     Boosting Regressor and returns the predicted energy value.
     """
-    if model is None:
+    active_model = get_active_model()
+    if active_model is None:
         raise HTTPException(
             status_code=503,
             detail="Model not loaded. Run evaluate_model.py first.",
@@ -156,7 +179,7 @@ def make_prediction(input_data: PredictionInput):
 
     try:
         input_dict = input_data.model_dump()
-        prediction = predict(model, input_dict)
+        prediction = predict(active_model, input_dict)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
