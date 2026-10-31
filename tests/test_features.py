@@ -63,7 +63,7 @@ class TestValidateData:
         })
         result = validate_data(df, "timestamp", "energy")
         assert len(result) == 2
-        assert result["timestamp"].dtype == "datetime64[ns]"
+        assert pd.api.types.is_datetime64_any_dtype(result["timestamp"])
 
     def test_missing_columns(self):
         df = pd.DataFrame({"a": [1, 2]})
