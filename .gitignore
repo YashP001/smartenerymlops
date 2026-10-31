@@ -25,6 +25,11 @@ data/monitoring/
 *.db
 *.sqlite3
 
+# Simulated production data
+data/simulated/*.csv
+data/simulated/*.json
+!data/simulated/.gitkeep
+
 # Secrets
 .env
 
