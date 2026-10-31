@@ -20,6 +20,11 @@ wandb/
 data/*.csv
 data/processed/*.csv
 
+# Monitoring database and logs
+data/monitoring/
+*.db
+*.sqlite3
+
 # Secrets
 .env
 

@@ -18,11 +18,38 @@ sys.path.insert(
 )
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+import logging
+import time
+import uuid
+from typing import Optional
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from src.predict import load_model, predict
 from src.features import FEATURE_COLUMNS
+from src.monitoring.database import (
+    init_db,
+    log_prediction,
+    log_feedback,
+    PredictionNotFoundError,
+    DuplicateFeedbackError,
+    InvalidFeedbackValueError,
+)
+
+logger = logging.getLogger("api.monitoring")
+
+
+def safe_log_prediction(*args, **kwargs):
+    """Safely log predictions to the monitoring database without disrupting the response."""
+    try:
+        log_prediction(*args, **kwargs)
+    except Exception as e:
+        logger.error(
+            "Failed to record prediction in monitoring database: %s",
+            e,
+            exc_info=True,
+        )
+
 
 # ─── Model lifecycle & Lifespan ──────────────────────────────────────
 
@@ -49,8 +76,14 @@ def get_active_model():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifecycle: load model once at startup into app.state."""
+    """Manage application lifecycle: initialize monitoring db and load model once."""
     global model
+    try:
+        init_db()
+        print("Monitoring persistence layer initialized.")
+    except Exception as e:
+        print(f"Monitoring DB initialization notice: {e}")
+
     try:
         loaded = load_model()
         app.state.model = loaded
@@ -126,7 +159,7 @@ class PredictionInput(BaseModel):
 
 
 class PredictionOutput(BaseModel):
-    """Prediction response with model metadata."""
+    """Prediction response with model metadata and tracking identifier."""
 
     predicted_energy_kwh: float = Field(
         ...,
@@ -140,6 +173,48 @@ class PredictionOutput(BaseModel):
         default_factory=lambda: FEATURE_COLUMNS.copy(),
         description="Feature columns used by the model",
     )
+    prediction_id: Optional[str] = Field(
+        default=None,
+        description="Unique identifier for the prediction (used for ground-truth feedback)",
+    )
+
+
+class FeedbackInput(BaseModel):
+    """Payload for recording actual ground-truth energy consumption."""
+
+    prediction_id: str = Field(
+        ...,
+        description="Unique prediction ID returned during inference",
+        examples=["123e4567-e89b-12d3-a456-426614174000"],
+    )
+    actual_energy_kwh: float = Field(
+        ...,
+        ge=0,
+        allow_inf_nan=False,
+        description="Actual observed energy consumption for the target hour (kWh)",
+        examples=[0.052],
+    )
+
+
+class ValueOnlyFeedbackInput(BaseModel):
+    """Payload for recording actual energy when prediction_id is in the path URL."""
+
+    actual_energy_kwh: float = Field(
+        ...,
+        ge=0,
+        allow_inf_nan=False,
+        description="Actual observed energy consumption for the target hour (kWh)",
+        examples=[0.052],
+    )
+
+
+class FeedbackResponse(BaseModel):
+    """Response for successful feedback ingestion."""
+
+    status: str = Field(default="success", description="Feedback ingestion status")
+    prediction_id: str = Field(..., description="Prediction identifier")
+    actual_energy_kwh: float = Field(..., description="Recorded actual energy (kWh)")
+    feedback_timestamp: str = Field(..., description="UTC timestamp of feedback ingestion")
 
 
 class HealthResponse(BaseModel):
@@ -164,11 +239,16 @@ def health_check():
 
 
 @app.post("/predict", response_model=PredictionOutput)
-def make_prediction(input_data: PredictionInput):
+def make_prediction(
+    input_data: PredictionInput,
+    background_tasks: BackgroundTasks,
+    response: Response,
+):
     """Predict next-hour energy consumption.
 
     Accepts the six input features used by the trained Gradient
-    Boosting Regressor and returns the predicted energy value.
+    Boosting Regressor, returns the predicted energy value, and asynchronously
+    records the prediction for performance and drift monitoring.
     """
     active_model = get_active_model()
     if active_model is None:
@@ -177,12 +257,75 @@ def make_prediction(input_data: PredictionInput):
             detail="Model not loaded. Run evaluate_model.py first.",
         )
 
+    start_time = time.perf_counter()
     try:
         input_dict = input_data.model_dump()
         prediction = predict(active_model, input_dict)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    prediction_id = str(uuid.uuid4())
+    model_name = getattr(active_model, "__class__", type(active_model)).__name__
+
+    # Asynchronously persist prediction without blocking client response
+    background_tasks.add_task(
+        safe_log_prediction,
+        prediction_id=prediction_id,
+        features=input_dict,
+        predicted_energy_kwh=prediction,
+        model_version=model_name,
+        latency_ms=latency_ms,
+    )
+
+    response.headers["X-Prediction-ID"] = prediction_id
+
     return PredictionOutput(
         predicted_energy_kwh=prediction,
+        model=model_name,
+        prediction_id=prediction_id,
     )
+
+
+@app.post("/feedback", response_model=FeedbackResponse)
+def record_feedback(feedback_data: FeedbackInput):
+    """Attach actual energy consumption feedback to an existing prediction."""
+    try:
+        result = log_feedback(
+            prediction_id=feedback_data.prediction_id,
+            actual_energy_kwh=feedback_data.actual_energy_kwh,
+        )
+        return FeedbackResponse(
+            status="success",
+            prediction_id=result["prediction_id"],
+            actual_energy_kwh=result["actual_energy_kwh"],
+            feedback_timestamp=result["feedback_timestamp"],
+        )
+    except PredictionNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except DuplicateFeedbackError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except InvalidFeedbackValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.post("/predictions/{prediction_id}/feedback", response_model=FeedbackResponse)
+def record_prediction_feedback(prediction_id: str, feedback_data: ValueOnlyFeedbackInput):
+    """Attach actual energy consumption feedback using path parameter prediction_id."""
+    try:
+        result = log_feedback(
+            prediction_id=prediction_id,
+            actual_energy_kwh=feedback_data.actual_energy_kwh,
+        )
+        return FeedbackResponse(
+            status="success",
+            prediction_id=result["prediction_id"],
+            actual_energy_kwh=result["actual_energy_kwh"],
+            feedback_timestamp=result["feedback_timestamp"],
+        )
+    except PredictionNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except DuplicateFeedbackError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except InvalidFeedbackValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
