@@ -79,6 +79,7 @@ class TestSchemaValidation:
 
     def test_non_numeric_type_issue_voltage(self, clean_synthetic_data):
         df_corrupt = clean_synthetic_data.copy()
+        df_corrupt["z_Avg Voltage (Volt)"] = df_corrupt["z_Avg Voltage (Volt)"].astype(object)
         df_corrupt.loc[0, "z_Avg Voltage (Volt)"] = "corrupted_text"
         res = check_schema_and_types(df_corrupt)
         assert res["passed"] is False
@@ -86,6 +87,7 @@ class TestSchemaValidation:
 
     def test_non_numeric_type_issue_energy(self, clean_synthetic_data):
         df_corrupt = clean_synthetic_data.copy()
+        df_corrupt["t_kWh"] = df_corrupt["t_kWh"].astype(object)
         df_corrupt.loc[1, "t_kWh"] = "not_a_number"
         res = check_schema_and_types(df_corrupt)
         assert res["passed"] is False
