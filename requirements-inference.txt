@@ -1,0 +1,12 @@
+# Dedicated runtime inference dependencies for Smart Home Energy Advisor
+# Excludes development/training tools: jupyter, matplotlib, seaborn, dvc, pytest, wandb
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+scikit-learn==1.9.0
+joblib==1.5.3
+numpy>=2.0.0
+pandas>=2.2.0
+mlflow>=3.0.0
+cloudpickle>=3.0.0

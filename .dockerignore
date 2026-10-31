@@ -1,0 +1,49 @@
+# .dockerignore for Smart Home Energy Advisor
+# Prevents large data files, virtual environments, caches, and secrets from entering build context
+
+# Git and Version Control
+.git/
+.gitignore
+
+# Virtual Environments and Python Binaries
+.venv/
+venv/
+ENV/
+env/
+
+# Python & Test Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Sensitive Information & Credentials
+.env
+*.env
+.env.*
+.dvc/config.local
+
+# DVC and Raw Data (never bundle large datasets or remote caches)
+.dvc/
+data/
+
+# Local Experiment Tracking Logs & Host-Specific SQLite DB
+mlruns/
+mlflow.db
+wandb/
+
+# Exploratory Notebooks & Reports (not needed for inference runtime)
+notebooks/
+reports/
+tests/
+
+# IDE & OS Metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Explicit Inclusion: models/ must NOT be ignored
+!models/
+!models/gradient_boosting.pkl

@@ -145,33 +145,60 @@ When running without an active W&B login, experiments are recorded in offline mo
 
 ---
 
+## Docker Containerization (Member 4)
+
+The FastAPI inference service is packaged into a self-contained, production-ready Docker image based on `python:3.13-slim`.
+
+For complete instructions, architecture explanations, and fallback behaviors, see the dedicated [Docker Containerization Guide](file:///e:/mlops%20phase%202/smart-home-energy-advisor/docs/docker_guide.md).
+
+### Quickstart Commands (PowerShell)
+
+```powershell
+# 1. Build the Docker image:
+docker build -t smart-home-energy-advisor .
+
+# 2. Run the container:
+docker run --rm -p 8000:8000 --name smart-home-advisor-app smart-home-energy-advisor
+
+# 3. Check health status:
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -Method Get
+
+# 4. Predict next-hour consumption:
+$body = @{
+    energy_current_hour = 0.05
+    energy_previous_hour = 0.04
+    energy_two_hours_ago = 0.06
+    target_hour = 14
+    target_day_of_week = 2
+    target_is_weekend = 0
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/predict" -Method Post -ContentType "application/json" -Body $body
+```
+
+---
+
 ## Repository Structure
 
 ```
+├── .dockerignore           # Excludes local caches, datasets, and secrets from Docker
 ├── .dvc/                   # DVC configuration and tracking metadata
 ├── .gitignore              # Git ignore rules for data, models, and caches
-├── requirements.txt        # Python dependency specifications
+├── Dockerfile              # Container definition for FastAPI inference service
+├── requirements.txt        # Full development & training dependencies
+├── requirements-inference.txt # Dedicated lightweight runtime inference dependencies
 ├── README.md               # Project documentation and workflow guide
+├── api/
+│   └── main.py             # FastAPI service with lifespan and /health, /predict endpoints
+├── docs/
+│   └── docker_guide.md     # Detailed containerization and deployment guide
 ├── data/
 │   ├── raw/                # Raw smart-meter CSV files (DVC tracked)
 │   └── processed/          # Cleaned and processed model datasets
 ├── models/                 # Saved model serialization artifacts (.pkl/.joblib)
-├── notebooks/
-│   └── 01_eda.ipynb        # Exploratory Data Analysis notebook (on member1-eda)
-├── reports/
-│   ├── data_verification.md   # Daily energy sum verification report
-│   ├── phase1_report.md       # Comprehensive Phase 1 summary report
-│   ├── validation_results.csv # Validation metric comparisons
-│   └── test_predictions.csv   # Model test-set predictions
-└── src/
-    ├── build_hourly_data.py   # Aggregates 3-min readings into verified hourly energy
-    ├── prepare_features.py    # Formulates lag features and next-hour target
-    ├── split_data.py          # Chronological train/validation/test split
-    ├── train.py               # Baseline training script
-    ├── train_models.py        # Model benchmarking script
-    ├── train_with_mlflow.py   # MLflow experiment tracking & model logging
-    ├── evaluate_model.py      # Final model refitting and test-set evaluation
-    └── verify_daily_totals.py # Verification script for daily aggregations
+├── notebooks/              # Exploratory Data Analysis notebooks
+├── reports/                # Validation results, metrics, and markdown reports
+├── src/                    # Feature pipeline, training, registry, and prediction modules
+└── tests/                  # Pytest automated test suites (108 tests passing)
 ```
 
 ---
