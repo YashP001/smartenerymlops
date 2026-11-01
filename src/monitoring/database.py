@@ -12,6 +12,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+import uuid
 
 
 class PredictionNotFoundError(Exception):
@@ -140,6 +141,34 @@ def init_db(db_path: Optional[str] = None) -> None:
         CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
         CREATE INDEX IF NOT EXISTS idx_alerts_type_version ON alerts(alert_type, model_version, status);
         CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts(created_at);
+
+        CREATE TABLE IF NOT EXISTS monitoring_runs (
+            run_id TEXT PRIMARY KEY,
+            timestamp TEXT NOT NULL,
+            model_version TEXT,
+            drift_status TEXT NOT NULL,
+            drift_share REAL,
+            performance_status TEXT NOT NULL,
+            mae REAL,
+            rmse REAL,
+            r2 REAL,
+            bias REAL,
+            sample_count INTEGER,
+            alerts_triggered INTEGER NOT NULL,
+            alerts_resolved INTEGER NOT NULL,
+            active_alerts_count INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS monitoring_execution_failures (
+            failure_id TEXT PRIMARY KEY,
+            timestamp TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            error_message TEXT,
+            model_version TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_monitoring_runs_timestamp ON monitoring_runs(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_monitoring_failures_op ON monitoring_execution_failures(operation);
         """)
         conn.commit()
 
@@ -511,3 +540,179 @@ def get_alert_history(
                     res["source_monitoring_result"] = res["source_result_json"]
             records.append(res)
         return records
+
+
+# ─── Monitoring Runs and Observability Persistence ────────────────────
+
+def log_monitoring_run(
+    run_id: str,
+    timestamp: str,
+    drift_status: str,
+    performance_status: str,
+    alerts_triggered: int,
+    alerts_resolved: int,
+    active_alerts_count: int,
+    model_version: Optional[str] = None,
+    drift_share: Optional[float] = None,
+    mae: Optional[float] = None,
+    rmse: Optional[float] = None,
+    r2: Optional[float] = None,
+    bias: Optional[float] = None,
+    sample_count: Optional[int] = None,
+    db_path: Optional[str] = None,
+) -> None:
+    """Record a completed monitoring cycle and its top-level evaluation metrics."""
+    path = db_path or get_db_path()
+    with get_connection(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO monitoring_runs (
+                run_id, timestamp, model_version, drift_status, drift_share,
+                performance_status, mae, rmse, r2, bias, sample_count,
+                alerts_triggered, alerts_resolved, active_alerts_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                run_id,
+                timestamp,
+                model_version,
+                drift_status,
+                float(drift_share) if drift_share is not None else None,
+                performance_status,
+                float(mae) if mae is not None else None,
+                float(rmse) if rmse is not None else None,
+                float(r2) if r2 is not None else None,
+                float(bias) if bias is not None else None,
+                int(sample_count) if sample_count is not None else None,
+                int(alerts_triggered),
+                int(alerts_resolved),
+                int(active_alerts_count),
+            ),
+        )
+        conn.commit()
+
+
+def log_monitoring_execution_failure(
+    operation: str,
+    error_message: str,
+    model_version: Optional[str] = None,
+    timestamp: Optional[str] = None,
+    db_path: Optional[str] = None,
+) -> str:
+    """Record an operational execution failure during monitoring orchestration."""
+    path = db_path or get_db_path()
+    failure_id = f"fail_{uuid.uuid4().hex[:8]}"
+    ts = timestamp or datetime.now(timezone.utc).isoformat()
+    with get_connection(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO monitoring_execution_failures (
+                failure_id, timestamp, operation, error_message, model_version
+            ) VALUES (?, ?, ?, ?, ?);
+            """,
+            (failure_id, ts, operation, str(error_message), model_version),
+        )
+        conn.commit()
+    return failure_id
+
+
+def get_monitoring_runs(
+    limit: int = 100,
+    db_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve historical monitoring run records."""
+    path = db_path or get_db_path()
+    with get_connection(path) as conn:
+        cursor = conn.execute(
+            "SELECT * FROM monitoring_runs ORDER BY timestamp DESC LIMIT ?;",
+            (limit,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_monitoring_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
+    """Retrieve aggregate observability metrics for Prometheus scraping."""
+    path = db_path or get_db_path()
+    stats: Dict[str, Any] = {
+        "drift_runs_total": 0,
+        "drift_failures_total": 0,
+        "latest_drift_share": None,
+        "performance_runs_total": 0,
+        "performance_failures_total": 0,
+        "latest_mae": {},
+        "latest_rmse": {},
+        "active_alerts": {},
+        "execution_failures": {},
+    }
+
+    with get_connection(path) as conn:
+        table_check = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('monitoring_runs', 'alerts', 'monitoring_execution_failures');"
+        ).fetchall()
+        tables = {row[0] for row in table_check}
+
+        if "monitoring_runs" in tables:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM monitoring_runs WHERE drift_status IN ('evaluated', 'failed');"
+            ).fetchone()
+            stats["drift_runs_total"] = int(row[0]) if row else 0
+
+            row = conn.execute(
+                "SELECT COUNT(*) FROM monitoring_runs WHERE drift_status = 'failed';"
+            ).fetchone()
+            stats["drift_failures_total"] = int(row[0]) if row else 0
+
+            row = conn.execute(
+                "SELECT drift_share FROM monitoring_runs WHERE drift_share IS NOT NULL ORDER BY timestamp DESC LIMIT 1;"
+            ).fetchone()
+            if row and row[0] is not None:
+                stats["latest_drift_share"] = float(row[0])
+
+            row = conn.execute(
+                "SELECT COUNT(*) FROM monitoring_runs WHERE performance_status IN ('evaluated', 'failed');"
+            ).fetchone()
+            stats["performance_runs_total"] = int(row[0]) if row else 0
+
+            row = conn.execute(
+                "SELECT COUNT(*) FROM monitoring_runs WHERE performance_status = 'failed';"
+            ).fetchone()
+            stats["performance_failures_total"] = int(row[0]) if row else 0
+
+            rows = conn.execute(
+                """
+                SELECT model_version, mae, rmse, MAX(timestamp)
+                FROM monitoring_runs
+                WHERE mae IS NOT NULL AND rmse IS NOT NULL
+                GROUP BY model_version;
+                """
+            ).fetchall()
+            for r in rows:
+                mv = r[0] or "GradientBoostingRegressor"
+                if r[1] is not None and r[2] is not None:
+                    stats["latest_mae"][mv] = float(r[1])
+                    stats["latest_rmse"][mv] = float(r[2])
+
+        if "alerts" in tables:
+            rows = conn.execute(
+                """
+                SELECT alert_type, severity, COUNT(*)
+                FROM alerts
+                WHERE status = 'active'
+                GROUP BY alert_type, severity;
+                """
+            ).fetchall()
+            for r in rows:
+                stats["active_alerts"][(r[0], r[1])] = int(r[2])
+
+        if "monitoring_execution_failures" in tables:
+            rows = conn.execute(
+                """
+                SELECT operation, COUNT(*)
+                FROM monitoring_execution_failures
+                GROUP BY operation;
+                """
+            ).fetchall()
+            for r in rows:
+                stats["execution_failures"][r[0]] = int(r[1])
+
+    return stats

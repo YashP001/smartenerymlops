@@ -15,4 +15,4 @@ joblib
 pydantic
 evidently==0.7.23
 scipy==1.18.0
-
+prometheus-client>=0.20.0

@@ -1,0 +1,20 @@
+# Prometheus scrape configuration for Smart Home Energy Advisor MLOps Observability
+# Scrapes the FastAPI service at /metrics every 15s.
+# Out-of-band monitoring metrics (drift, performance, alerts) are exposed dynamically
+# through the API's custom Prometheus collector backed by SQLite.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: "smart-home-energy-advisor"
+    metrics_path: "/metrics"
+    scheme: "http"
+    static_configs:
+      - targets: ["api:8000"]
+        labels:
+          environment: "local"
+          app: "smart-home-energy-advisor"
+          tier: "mlops-inference"

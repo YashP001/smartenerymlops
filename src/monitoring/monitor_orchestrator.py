@@ -28,7 +28,12 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from src.monitoring.alert_manager import AlertManager, AlertType, NotificationMessage
-from src.monitoring.database import get_db_path, init_db
+from src.monitoring.database import (
+    get_db_path,
+    init_db,
+    log_monitoring_run,
+    log_monitoring_execution_failure,
+)
 from src.monitoring.drift_detector import (
     DEFAULT_REF_PATH,
     run_drift_analysis,
@@ -131,6 +136,10 @@ def run_monitoring_cycle(
         except Exception as e:
             logger.error("Drift detection execution failed: %s", e, exc_info=True)
             run_summary["drift_status"] = "failed"
+            try:
+                log_monitoring_execution_failure("drift_detection", str(e), model_version=model_version, db_path=active_db)
+            except Exception as db_err:
+                logger.warning("Failed to log drift execution failure: %s", db_err)
             fail_alert, fail_notif = mgr.record_execution_failure(
                 operation_name="drift_detection",
                 error=e,
@@ -185,6 +194,10 @@ def run_monitoring_cycle(
     except Exception as e:
         logger.error("Performance monitoring execution failed: %s", e, exc_info=True)
         run_summary["performance_status"] = "failed"
+        try:
+            log_monitoring_execution_failure("performance_monitoring", str(e), model_version=model_version, db_path=active_db)
+        except Exception as db_err:
+            logger.warning("Failed to log performance execution failure: %s", db_err)
         fail_alert, fail_notif = mgr.record_execution_failure(
             operation_name="performance_monitoring",
             error=e,
@@ -196,6 +209,31 @@ def run_monitoring_cycle(
     # Count currently active alerts in the database
     run_summary["active_alerts_count"] = len(mgr.get_active_alerts())
     run_summary["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Persist monitoring run snapshot for observability
+    try:
+        drift_res = run_summary.get("drift_result")
+        perf_res = run_summary.get("performance_result")
+        log_monitoring_run(
+            run_id=cycle_id,
+            timestamp=start_time,
+            drift_status=run_summary["drift_status"],
+            performance_status=run_summary["performance_status"],
+            alerts_triggered=len(run_summary["alerts_triggered"]),
+            alerts_resolved=len(run_summary["alerts_resolved"]),
+            active_alerts_count=run_summary["active_alerts_count"],
+            model_version=model_version,
+            drift_share=drift_res.get("drift_share") if isinstance(drift_res, dict) else None,
+            mae=perf_res.get("mae") if isinstance(perf_res, dict) else None,
+            rmse=perf_res.get("rmse") if isinstance(perf_res, dict) else None,
+            r2=perf_res.get("r2") if isinstance(perf_res, dict) else None,
+            bias=perf_res.get("mean_bias") if isinstance(perf_res, dict) else None,
+            sample_count=perf_res.get("sample_count") if isinstance(perf_res, dict) else None,
+            db_path=active_db,
+        )
+    except Exception as persist_err:
+        logger.warning("Failed to persist monitoring run observability record: %s", persist_err)
+
     logger.info(
         "Monitoring cycle '%s' complete. Triggered: %d, Suppressed: %d, Resolved: %d, Active: %d",
         cycle_id,

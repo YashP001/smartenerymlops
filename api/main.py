@@ -22,7 +22,7 @@ import logging
 import time
 import uuid
 from typing import Optional
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from src.predict import load_model, predict
@@ -35,6 +35,7 @@ from src.monitoring.database import (
     DuplicateFeedbackError,
     InvalidFeedbackValueError,
 )
+from src.monitoring.metrics import default_metrics
 
 logger = logging.getLogger("api.monitoring")
 
@@ -110,6 +111,32 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def prometheus_http_middleware(request: Request, call_next):
+    """Record HTTP request counts and durations with low-cardinality endpoint paths."""
+    start = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    except Exception:
+        status_code = 500
+        raise
+    finally:
+        # Exclude internal /metrics scrape requests from application HTTP traffic metrics
+        if request.url.path != "/metrics":
+            duration = time.perf_counter() - start
+            route = request.scope.get("route")
+            endpoint = route.path if route and hasattr(route, "path") else "unmatched"
+            default_metrics.record_http(
+                method=request.method,
+                endpoint=endpoint,
+                status_code=status_code,
+                duration_seconds=duration,
+            )
 
 
 # ─── Request / response schemas ──────────────────────────────────────
@@ -238,6 +265,16 @@ def health_check():
     )
 
 
+@app.get("/metrics")
+def metrics_endpoint():
+    """Expose Prometheus metrics for operational observability scraping."""
+    payload = default_metrics.generate_payload()
+    return Response(
+        content=payload,
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
 @app.post("/predict", response_model=PredictionOutput)
 def make_prediction(
     input_data: PredictionInput,
@@ -252,6 +289,10 @@ def make_prediction(
     """
     active_model = get_active_model()
     if active_model is None:
+        default_metrics.record_prediction(
+            model_version="unknown",
+            status="error",
+        )
         raise HTTPException(
             status_code=503,
             detail="Model not loaded. Run evaluate_model.py first.",
@@ -262,11 +303,31 @@ def make_prediction(
         input_dict = input_data.model_dump()
         prediction = predict(active_model, input_dict)
     except ValueError as e:
+        model_name = getattr(active_model, "__class__", type(active_model)).__name__
+        default_metrics.record_prediction(
+            model_version=model_name,
+            status="error",
+        )
         raise HTTPException(status_code=422, detail=str(e))
+    except Exception:
+        model_name = getattr(active_model, "__class__", type(active_model)).__name__
+        default_metrics.record_prediction(
+            model_version=model_name,
+            status="error",
+        )
+        raise
 
-    latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    latency_s = time.perf_counter() - start_time
+    latency_ms = round(latency_s * 1000, 2)
     prediction_id = str(uuid.uuid4())
     model_name = getattr(active_model, "__class__", type(active_model)).__name__
+
+    default_metrics.record_prediction(
+        model_version=model_name,
+        status="success",
+        latency_seconds=latency_s,
+        predicted_energy=prediction,
+    )
 
     # Asynchronously persist prediction without blocking client response
     background_tasks.add_task(

@@ -10,3 +10,4 @@ numpy>=2.0.0
 pandas>=2.2.0
 mlflow>=3.0.0
 cloudpickle>=3.0.0
+prometheus-client>=0.20.0
