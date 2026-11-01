@@ -5,6 +5,7 @@ Phase 3.1 deliverable: Implements decoupled, non-blocking storage for
 operational model predictions and delayed actual meter feedback.
 """
 
+import json
 import math
 import os
 import sqlite3
@@ -119,6 +120,26 @@ def init_db(db_path: Optional[str] = None) -> None:
             END AS absolute_error
         FROM predictions p
         LEFT JOIN feedback f ON p.prediction_id = f.prediction_id;
+
+        CREATE TABLE IF NOT EXISTS alerts (
+            alert_id TEXT PRIMARY KEY,
+            alert_type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            status TEXT NOT NULL,
+            model_version TEXT,
+            message TEXT NOT NULL,
+            metrics_json TEXT,
+            source_result_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            resolved_at TEXT,
+            trigger_count INTEGER NOT NULL DEFAULT 1,
+            last_triggered_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
+        CREATE INDEX IF NOT EXISTS idx_alerts_type_version ON alerts(alert_type, model_version, status);
+        CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts(created_at);
         """)
         conn.commit()
 
@@ -307,3 +328,186 @@ def get_monitoring_counts(db_path: Optional[str] = None) -> Dict[str, int]:
             "total_predictions": pred_count,
             "total_feedback": fb_count,
         }
+
+
+# ─── Alert Persistence and Lifecycle ──────────────────────────────────
+
+def save_alert(alert_data: Dict[str, Any], db_path: Optional[str] = None) -> None:
+    """Insert or update an alert record in the monitoring database."""
+    path = db_path or get_db_path()
+    metrics_str = (
+        json.dumps(alert_data["metrics"])
+        if isinstance(alert_data.get("metrics"), (dict, list))
+        else alert_data.get("metrics_json")
+    )
+    source_str = (
+        json.dumps(alert_data["source_monitoring_result"])
+        if isinstance(alert_data.get("source_monitoring_result"), (dict, list))
+        else alert_data.get("source_result_json")
+    )
+
+    with get_connection(path) as conn:
+        conn.execute(
+            """
+            INSERT INTO alerts (
+                alert_id,
+                alert_type,
+                severity,
+                status,
+                model_version,
+                message,
+                metrics_json,
+                source_result_json,
+                created_at,
+                updated_at,
+                resolved_at,
+                trigger_count,
+                last_triggered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(alert_id) DO UPDATE SET
+                status = excluded.status,
+                severity = excluded.severity,
+                message = excluded.message,
+                metrics_json = excluded.metrics_json,
+                source_result_json = excluded.source_result_json,
+                updated_at = excluded.updated_at,
+                resolved_at = excluded.resolved_at,
+                trigger_count = excluded.trigger_count,
+                last_triggered_at = excluded.last_triggered_at;
+            """,
+            (
+                alert_data["alert_id"],
+                alert_data["alert_type"],
+                alert_data["severity"],
+                alert_data["status"],
+                alert_data.get("model_version"),
+                alert_data["message"],
+                metrics_str,
+                source_str,
+                alert_data["created_at"],
+                alert_data["updated_at"],
+                alert_data.get("resolved_at"),
+                int(alert_data.get("trigger_count", 1)),
+                alert_data.get("last_triggered_at", alert_data["updated_at"]),
+            ),
+        )
+        conn.commit()
+
+
+def get_alert(alert_id: str, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve an alert record by its unique ID."""
+    path = db_path or get_db_path()
+    with get_connection(path) as conn:
+        cursor = conn.execute(
+            "SELECT * FROM alerts WHERE alert_id = ?;",
+            (alert_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        res = dict(row)
+        if res.get("metrics_json"):
+            try:
+                res["metrics"] = json.loads(res["metrics_json"])
+            except Exception:
+                res["metrics"] = res["metrics_json"]
+        if res.get("source_result_json"):
+            try:
+                res["source_monitoring_result"] = json.loads(res["source_result_json"])
+            except Exception:
+                res["source_monitoring_result"] = res["source_result_json"]
+        return res
+
+
+def get_active_alerts(
+    db_path: Optional[str] = None,
+    alert_type: Optional[str] = None,
+    model_version: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve currently active alerts, optionally filtered by type or model version."""
+    path = db_path or get_db_path()
+    query = "SELECT * FROM alerts WHERE status = 'active'"
+    params: List[Any] = []
+
+    if alert_type:
+        query += " AND alert_type = ?"
+        params.append(alert_type)
+
+    if model_version:
+        query += " AND (model_version = ? OR model_version IS NULL)"
+        params.append(model_version)
+
+    query += " ORDER BY created_at DESC;"
+
+    with get_connection(path) as conn:
+        cursor = conn.execute(query, params)
+        records = []
+        for row in cursor.fetchall():
+            res = dict(row)
+            if res.get("metrics_json"):
+                try:
+                    res["metrics"] = json.loads(res["metrics_json"])
+                except Exception:
+                    res["metrics"] = res["metrics_json"]
+            if res.get("source_result_json"):
+                try:
+                    res["source_monitoring_result"] = json.loads(res["source_result_json"])
+                except Exception:
+                    res["source_monitoring_result"] = res["source_result_json"]
+            records.append(res)
+        return records
+
+
+def resolve_alert(
+    alert_id: str,
+    resolved_at: Optional[str] = None,
+    db_path: Optional[str] = None,
+) -> bool:
+    """Transition an active alert to resolved status."""
+    path = db_path or get_db_path()
+    res_time = resolved_at or datetime.now(timezone.utc).isoformat()
+    with get_connection(path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE alerts
+            SET status = 'resolved',
+                resolved_at = ?,
+                updated_at = ?
+            WHERE alert_id = ? AND status = 'active';
+            """,
+            (res_time, res_time, alert_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def get_alert_history(
+    limit: int = 100,
+    db_path: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve full chronological alert history (both active and resolved)."""
+    path = db_path or get_db_path()
+    with get_connection(path) as conn:
+        cursor = conn.execute(
+            """
+            SELECT * FROM alerts
+            ORDER BY created_at DESC
+            LIMIT ?;
+            """,
+            (limit,),
+        )
+        records = []
+        for row in cursor.fetchall():
+            res = dict(row)
+            if res.get("metrics_json"):
+                try:
+                    res["metrics"] = json.loads(res["metrics_json"])
+                except Exception:
+                    res["metrics"] = res["metrics_json"]
+            if res.get("source_result_json"):
+                try:
+                    res["source_monitoring_result"] = json.loads(res["source_result_json"])
+                except Exception:
+                    res["source_monitoring_result"] = res["source_result_json"]
+            records.append(res)
+        return records
