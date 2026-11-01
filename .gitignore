@@ -30,6 +30,11 @@ data/simulated/*.csv
 data/simulated/*.json
 !data/simulated/.gitkeep
 
+# Drift detection reports
+reports/drift/*.html
+reports/drift/*.json
+!reports/drift/.gitkeep
+
 # Secrets
 .env
 
