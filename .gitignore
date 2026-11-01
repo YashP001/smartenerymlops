@@ -28,6 +28,9 @@ data/monitoring/
 # Simulated production data
 data/simulated/*.csv
 data/simulated/*.json
+data/simulated/**/*.csv
+data/simulated/**/*.json
+data/simulated/demo/
 !data/simulated/.gitkeep
 
 # Drift detection reports
@@ -38,6 +41,9 @@ reports/drift/*.json
 # Performance monitoring reports
 reports/performance/*.json
 !reports/performance/.gitkeep
+
+# Demonstration artifacts
+reports/demo/
 
 # Secrets
 .env

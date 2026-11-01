@@ -468,3 +468,44 @@ class TestEndToEndEvaluationAndReporting:
         assert "degradation_assessment" in data
         assert "thresholds" in data
         assert "time_breakdown" in data
+
+
+# ─── 5. Baseline Metrics & Threshold Consistency Tests ───────────────────
+
+class TestBaselineMetricsAndThresholds:
+    """Verifies Phase 1 empirical baseline consistency and degradation limits."""
+
+    def test_baseline_metrics_values(self):
+        """BASELINE_METRICS contains exact Phase 1 empirical values on N=4,120 test rows."""
+        assert BASELINE_METRICS["MAE"] == pytest.approx(0.0739, abs=1e-4)
+        assert BASELINE_METRICS["RMSE"] == pytest.approx(0.1512, abs=1e-4)
+        assert BASELINE_METRICS["R2"] == pytest.approx(0.3723, abs=1e-4)
+        # Empirical baseline bias measured on reports/test_predictions.csv is +0.001534 kWh
+        assert BASELINE_METRICS["BIAS"] == pytest.approx(0.0015, abs=1e-4)
+
+    def test_bias_degradation_evaluation_with_empirical_baseline(self):
+        """evaluate_degradation correctly checks bias threshold (0.05 kWh) against empirical baseline."""
+        # Test healthy bias (+0.0016 kWh, close to baseline +0.0015 kWh)
+        healthy_metrics = {
+            "mae": 0.0706,
+            "rmse": 0.1332,
+            "r2": 0.4151,
+            "bias": 0.0016,
+            "sample_count": 35,
+        }
+        res_healthy = evaluate_degradation(healthy_metrics)
+        assert res_healthy["status"] == "healthy"
+        assert res_healthy["is_degraded"] is False
+
+        # Test degraded positive bias (+0.06 kWh, exceeds 0.05 kWh threshold)
+        degraded_metrics = {
+            "mae": 0.0706,
+            "rmse": 0.1332,
+            "r2": 0.4151,
+            "bias": 0.0600,
+            "sample_count": 35,
+        }
+        res_degraded = evaluate_degradation(degraded_metrics)
+        assert res_degraded["status"] == "degraded"
+        assert res_degraded["is_degraded"] is True
+        assert any("bias" in r.lower() for r in res_degraded["reasons"])

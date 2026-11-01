@@ -214,6 +214,9 @@ def run_monitoring_cycle(
     try:
         drift_res = run_summary.get("drift_result")
         perf_res = run_summary.get("performance_result")
+        perf_metrics = {}
+        if isinstance(perf_res, dict):
+            perf_metrics = perf_res.get("metrics") if isinstance(perf_res.get("metrics"), dict) else perf_res
         log_monitoring_run(
             run_id=cycle_id,
             timestamp=start_time,
@@ -224,11 +227,11 @@ def run_monitoring_cycle(
             active_alerts_count=run_summary["active_alerts_count"],
             model_version=model_version,
             drift_share=drift_res.get("drift_share") if isinstance(drift_res, dict) else None,
-            mae=perf_res.get("mae") if isinstance(perf_res, dict) else None,
-            rmse=perf_res.get("rmse") if isinstance(perf_res, dict) else None,
-            r2=perf_res.get("r2") if isinstance(perf_res, dict) else None,
-            bias=perf_res.get("mean_bias") if isinstance(perf_res, dict) else None,
-            sample_count=perf_res.get("sample_count") if isinstance(perf_res, dict) else None,
+            mae=perf_metrics.get("mae") if isinstance(perf_metrics, dict) else None,
+            rmse=perf_metrics.get("rmse") if isinstance(perf_metrics, dict) else None,
+            r2=perf_metrics.get("r2") if isinstance(perf_metrics, dict) else None,
+            bias=perf_metrics.get("bias") if isinstance(perf_metrics, dict) else perf_metrics.get("mean_bias"),
+            sample_count=perf_metrics.get("sample_count") if isinstance(perf_metrics, dict) else (perf_res.get("evaluated_predictions") if isinstance(perf_res, dict) else None),
             db_path=active_db,
         )
     except Exception as persist_err:

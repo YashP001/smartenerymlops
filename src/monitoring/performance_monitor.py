@@ -29,11 +29,12 @@ from src.monitoring.database import get_connection, get_db_path
 DEFAULT_REPORT_DIR = os.path.join(_PROJECT_ROOT, "reports", "performance")
 
 # Empirical baseline established on chronological test set (reports/phase1_report.md)
+# Exact measured values on N=4,120 test rows: MAE 0.073893, RMSE 0.151195, R2 0.372327, BIAS +0.0015338
 BASELINE_METRICS = {
     "MAE": 0.0739,
     "RMSE": 0.1512,
     "R2": 0.3723,
-    "BIAS": 0.0,
+    "BIAS": 0.0015,
 }
 
 # Configurable degradation threshold defaults

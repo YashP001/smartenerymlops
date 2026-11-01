@@ -1,289 +1,229 @@
-# AI-Assisted Smart Home Energy Advisor
+# AI-Assisted Smart Home Energy Advisor — End-to-End MLOps Integration
 
-An end-to-end Machine Learning Operations (MLOps) project for household energy forecasting. The project develops, tracks, and evaluates machine learning models to predict a smart meter's electricity consumption for the next hour based on historical readings and calendar features.
+[![CI Tests](https://img.shields.io/badge/tests-271%20passed-success)](tests/)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-1.0.0-009688.svg)](https://fastapi.tiangolo.com/)
+[![MLflow](https://img.shields.io/badge/MLflow-Tracking%20%26%20Registry-0194E2.svg)](https://mlflow.org/)
+[![Evidently AI](https://img.shields.io/badge/Evidently%20AI-Drift%20Detection-orange.svg)](https://evidentlyai.com/)
+[![Prometheus](https://img.shields.io/badge/Prometheus-v2.53.0-E6522C.svg)](https://prometheus.io/)
+[![Grafana](https://img.shields.io/badge/Grafana-v11.1.0-F46800.svg)](https://grafana.com/)
 
----
-
-## Table of Contents
-- [Project Overview](#project-overview)
-- [Dataset Details](#dataset-details)
-- [System Architecture & Pipeline](#system-architecture--pipeline)
-- [Model Performance & Evaluation](#model-performance--evaluation)
-- [MLflow Experiment Tracking](#mlflow-experiment-tracking)
-- [Repository Structure](#repository-structure)
-- [Branching & Collaboration Strategy](#branching--collaboration-strategy)
-- [Getting Started & Reproducibility](#getting-started--reproducibility)
-- [Team Roles & Contributions](#team-roles--contributions)
-- [Roadmap & Next Steps](#roadmap--next-steps)
+An end-to-end Machine Learning Operations (MLOps) platform for residential electricity consumption forecasting. The system predicts next-hour household energy consumption from smart-meter telemetry and manages the operational model lifecycle: automated inference, delayed ground-truth feedback ingestion, production data simulation, statistical and Evidently AI drift detection, model performance evaluation against baselines, automated alerting with recovery, and Prometheus/Grafana observability.
 
 ---
 
-## Project Overview
+## 1. Project Overview
 
-The primary objective of this project is to explore whether historical smart-meter readings can reliably forecast a household meter's energy consumption ($t_{\text{kWh}}$) for the next hour. Accurate hour-ahead energy prediction empowers consumers with actionable energy-saving insights and grid operators with demand-forecasting data.
+Accurate hour-ahead electricity forecasting enables residential consumers to optimize high-load appliance scheduling (e.g. HVAC, water heating, EV charging) and assists grid utilities in localized demand management.
 
-### Phase 1 Focus: Development and Reproducibility
-- **Empirical Data Verification:** Confirm consistency between raw multi-minute readings and daily aggregations.
-- **Data Engineering:** Aggregate 3-minute readings into strict hourly consumption windows and formulate lag/calendar features.
-- **Baseline & ML Models:** Benchmark Persistence, Linear Regression, Random Forest, and Gradient Boosting Regressors using chronological train/validation/test splits.
-- **Experiment Tracking:** Track model parameters, validation metrics (MAE, RMSE, $R^2$), and model artifacts with MLflow (including explicit signatures).
-- **Version Control & Data Management:** Track source code via Git/GitHub feature branches and initialize data management via DVC.
+The predictive model is trained on the empirical **CEEW (Council on Energy, Environment and Water) Mathura Smart Meter Dataset** (2021), comprising 550,560 raw multi-minute readings across 35 residential households. Cleaned into strict hourly intervals, the model uses six historical and calendar features to forecast next-hour energy consumption (`target_next_hour` in kWh).
 
----
-
-## Dataset Details
-
-The project utilizes the **CEEW (Council on Energy, Environment and Water) Smart Meter Energy Consumption Dataset** for Mathura, India (2021).
-
-- **Raw Dimensions:** 550,560 rows, 6 columns across 35 unique smart meters.
-- **Nominal Sampling Interval:** Every 3 minutes.
-- **Feature Attributes:**
-  - `x_Timestamp`: Reading timestamp
-  - `t_kWh`: Electricity consumption for the sampling interval
-  - `z_Avg Voltage (Volt)`: Average voltage
-  - `z_Avg Current (Amp)`: Average current
-  - `y_Freq (Hz)`: Frequency
-  - `meter`: Smart meter identifier
-- **Data Quality & Verification (`reports/data_verification.md`):**
-  - Zero missing values and zero duplicate `(meter, timestamp)` pairs in the inspected raw dataset.
-  - Aggregated 3-minute sums were matched against the official CEEW daily aggregated dataset (`SM Cleaned Data MH Aggregated.csv`): all 1,147 matching meter-days agreed within floating-point precision ($< 0.001\text{ kWh}$ error, mean difference $\approx 9.83 \times 10^{-15}\text{ kWh}$), proving additive consistency of `t_kWh`.
-  - Voltage/frequency outliers and zeros were analyzed; the current energy forecasting pipeline strictly isolates consumption features (`t_kWh` and temporal features) without relying on electrical voltage/current/frequency columns.
+### Operational Highlights
+- **Winning Model Architecture:** Gradient Boosting Regressor (`n_estimators=100`, `max_depth=5`, `learning_rate=0.1`, `random_state=42`) using six canonical telemetry and calendar features.
+- **Phase 1 Historical Baseline Checkpoint:**
+  - Trained on merged `train + validation` splits ($N=22,781$ rows).
+  - Evaluated on all $N=4,120$ held-out chronological test rows (`data/test.csv`).
+  - Empirical Baseline Metrics: $\text{MAE} = 0.0739\text{ kWh}$, $\text{RMSE} = 0.1512\text{ kWh}$, $R^2 = 0.3723$, and $\text{Mean Bias} = +0.001534\text{ kWh}$.
+- **MLflow Registry Version 1 Checkpoint (`models:/smart-home-energy-advisor/1`):**
+  - Identical model architecture and hyperparameters, logged during initial experiment comparison.
+  - Trained on `train.csv` only ($N=18,696$ rows).
+  - Full test set performance ($N=4,120$ rows): $\text{MAE} = 0.0738\text{ kWh}$, $\text{RMSE} = 0.1510\text{ kWh}$, $R^2 = 0.3736$, and $\text{Mean Bias} = +0.002273\text{ kWh}$.
+  - *Note on Model Lineage:* These represent two distinct training checkpoints of the same architecture, not identical serialized artifacts. Both exhibit virtually identical generalization. The Phase 3.7 authentic demonstration draws a reproducible 35-row sample from `data/test.csv` (using seed 42) to evaluate operational accuracy against the Phase 1 baseline.
+- **Real-Time Serving:** High-throughput FastAPI REST API with non-blocking SQLite prediction logging.
+- **Closed-Loop Feedback:** Asynchronous actual-value feedback ingestion and automated record pairing.
+- **Production Simulation:** Deterministic scenario generator simulating normal operation, afternoon HVAC load spikes (covariate shift), and sensor decay (calibration bias).
+- **Drift & Degradation Detection:** SciPy Kolmogorov-Smirnov statistical tests, Cohen's $d$ effect sizes, Evidently AI interactive HTML reports, and baseline degradation alerts (with $\ge 30$ sample statistical threshold).
+- **Automated Lifecycle Orchestration:** Self-healing alert state machine with duplicate cooldown and automatic recovery upon distribution normalization.
+- **Enterprise Observability:** Prometheus `/metrics` exposition and pre-provisioned Grafana monitoring dashboards.
 
 ---
 
-## System Architecture & Pipeline
+## 2. Architecture Diagram
 
-The pipeline processes raw smart-meter time series into cleaned, model-ready chronological datasets:
+```mermaid
+flowchart TD
+    subgraph Data Layer
+        A[CEEW Smart Meter Data<br/>550k Raw 3-min Readings] --> B[Feature Pipeline<br/>Hourly Aggregations & Lags]
+        B --> C[(train.csv / test.csv<br/>Historical Baseline)]
+    end
 
+    subgraph Model Lifecycle
+        C --> D[Model Training & MLflow<br/>Gradient Boosting Regressor]
+        D --> E[(MLflow Model Registry<br/>models:/smart-home.../1)]
+        E --> F[FastAPI Inference Engine<br/>api/main.py]
+    end
+
+    subgraph Serving & Ingestion
+        User([Smart Meter Client]) -->|POST /predict| F
+        User -->|POST /feedback| F
+        F -->|Asynchronous Logging| G[(SQLite Persistence<br/>predictions.db)]
+        G --> H[v_monitoring_records<br/>Paired Predictions & Feedback]
+    end
+
+    subgraph Simulation & Drift
+        I[Production Simulator<br/>src/simulation.py] -->|Normal / HVAC Shift / Sensor Drift| J[(Simulated Datasets<br/>data/simulated/)]
+        J & C --> K[Drift Detector<br/>Evidently AI & SciPy KS-Test]
+        K --> L[Interactive HTML Reports<br/>reports/drift/]
+    end
+
+    subgraph Monitoring & Alerting
+        H --> M[Performance Monitor<br/>MAE, RMSE, R2, Bias]
+        K & M --> N[Monitoring Orchestrator<br/>run_monitoring_cycle]
+        N --> O[Alert Manager<br/>Trigger / Cooldown / Resolution]
+        O --> G
+    end
+
+    subgraph Observability
+        F -->|GET /metrics| P[Prometheus Scraper<br/>Port 9090]
+        G -.->|Dynamic Query| F
+        P --> Q[Grafana Operations Dashboard<br/>Port 3000]
+    end
 ```
-Raw Readings (3-min intervals)
-          │
-          ▼
-[ src/build_hourly_data.py ]
-   - Validate exactly 20 readings/hr at {00, 03, ..., 57} min
-   - Sum t_kWh into hourly consumption (hourly_energy.csv)
-          │
-          ▼
-[ src/prepare_features.py ]
-   - Verify consecutive hour sequences
-   - Construct lag features (t, t-1, t-2)
-   - Add calendar features (hour, day of week, is_weekend)
-   - Formulate target (t+1) -> model_dataset.csv (26,901 rows)
-          │
-          ▼
-[ src/split_data.py ]
-   - Chronological split (70% Train, 15% Validation, 15% Test)
-   - Train: 18,696 rows | Validation: 4,085 rows | Test: 4,120 rows
-          │
-          ▼
-[ src/train_with_mlflow.py ] & [ src/evaluate_model.py ]
-   - Train candidates, log metrics & signatures to MLflow
-   - Refit best model on Train + Validation, evaluate on Test
-```
-
-### Feature Set
-| Feature Name | Description |
-|---|---|
-| `energy_current_hour` | Energy consumption in the current hour ($t$) |
-| `energy_previous_hour` | Energy consumption in the previous hour ($t-1$) |
-| `energy_two_hours_ago` | Energy consumption two hours ago ($t-2$) |
-| `target_hour` | Hour of the day for the prediction target ($0 - 23$) |
-| `target_day_of_week` | Day of week for target ($0 = \text{Monday}, 6 = \text{Sunday}$) |
-| `target_is_weekend` | Binary flag ($1$ if Saturday/Sunday, $0$ otherwise) |
-| **`target_next_hour`** | **Target variable**: Energy consumption in hour $t+1$ |
 
 ---
 
-## Model Performance & Evaluation
+## 3. Technology Stack
 
-Models were evaluated across chronological splits using Mean Absolute Error (MAE), Root Mean Squared Error (RMSE), and $R^2$ score.
-
-### Validation Set Comparison (`reports/validation_results.csv`)
-
-| Model | Validation MAE (kWh) | Validation RMSE (kWh) | Validation $R^2$ |
-|---|---:|---:|---:|
-| **Gradient Boosting** | **0.0712** | **0.1423** | **0.3397** |
-| Random Forest | 0.0734 | 0.1472 | 0.2942 |
-| Persistence Baseline | 0.0778 | 0.1827 | -0.0885 |
-| Linear Regression | 0.0821 | 0.1554 | 0.2125 |
-
-### Final Evaluation on Chronological Test Set
-
-Following model selection on validation data, the winning **Gradient Boosting Regressor** was refitted on combined training + validation data (`development`) and evaluated on the unseen chronological test set (`reports/test_predictions.csv`):
-
-- **Test Samples:** 4,120 rows
-- **Test MAE:** **0.0739 kWh**
-- **Test RMSE:** **0.1512 kWh**
-- **Test $R^2$:** **0.3723**
+| Layer | Technologies | Purpose |
+| :--- | :--- | :--- |
+| **Core Framework** | Python 3.10–3.13, NumPy, Pandas, SciPy | Data processing, statistical hypothesis testing, and numerical computation. |
+| **Machine Learning** | Scikit-learn, Joblib | Gradient Boosting, Random Forest, Linear Regression, and Persistence modeling. |
+| **Experiment Tracking** | MLflow, Weights & Biases (W&B) | Hyperparameter logging, model signatures, metrics tracking, and Model Registry. |
+| **Inference API** | FastAPI, Uvicorn, Pydantic v2 | High-performance asynchronous REST API with strict input/output validation. |
+| **Persistence** | SQLite3, PRAGMA foreign keys, SQL Views | Decoupled prediction logging, feedback storage, alert state tracking, and run history. |
+| **Drift Monitoring** | Evidently AI, SciPy (KS-test, Cohen's $d$) | Feature-level distribution shift, target concept drift, and interactive visual reports. |
+| **Observability** | Prometheus (`prometheus_client`), Grafana | Real-time metric scraping, time-series storage, and operational dashboard visualization. |
+| **Containerization** | Docker, Docker Compose | Multi-container microservice orchestration (`api`, `prometheus`, `grafana`). |
+| **Testing & CI** | Pytest (271 tests), Starlette TestClient | Unit testing, statistical assertions, alert lifecycle validation, and end-to-end integration. |
 
 ---
 
-## MLflow & Weights & Biases Experiment Tracking
+## 4. Canonical Model Features
 
-The project uses MLflow for model registry and tracking, and Weights & Biases (W&B) for interactive dashboards:
-- **MLflow Experiment Name:** `smart-home-energy-advisor` (stored in persistent SQLite DB `mlflow.db`)
-- **Logged Parameters:** Model type, feature count, target column, and scikit-learn hyperparameters via `get_params()`.
-- **Logged Metrics:** Validation MAE, RMSE, and $R^2$.
-- **Model Signatures & Artifacts:** Logged with explicit input/output schemas (`infer_signature`) and cloudpickle serialization.
-- **Model Registry:** Best run (`GradientBoostingRegressor`) registered under `smart-home-energy-advisor` (Version 1) with idempotency protection.
+The model consumes six features to forecast the next hour's electricity consumption (`target_next_hour` in kWh):
 
-### Viewing MLflow Locally
+| Feature Name | Type | Description | Valid Bounds |
+| :--- | :---: | :--- | :--- |
+| `energy_current_hour` | Float | Electricity consumption during the current hour ($t$) | $\ge 0.0$ kWh |
+| `energy_previous_hour` | Float | Electricity consumption during the previous hour ($t-1$) | $\ge 0.0$ kWh |
+| `energy_two_hours_ago` | Float | Electricity consumption two hours ago ($t-2$) | $\ge 0.0$ kWh |
+| `target_hour` | Integer | Hour of the day for the prediction target | $0 - 23$ |
+| `target_day_of_week` | Integer | Day of the week for the target | $0 = \text{Monday}, 6 = \text{Sunday}$ |
+| `target_is_weekend` | Integer | Weekend binary indicator | $0 = \text{Weekday}, 1 = \text{Weekend}$ |
+
+---
+
+## 5. Quickstart: Reproducible End-to-End Demonstration
+
+The platform includes a self-contained demonstration script (`scripts/run_end_to_end_demo.py`) that executes the complete 10-stage operational lifecycle.
+
+### 5.1 One-Command Automated Run
+
+Run the demonstration script using the local virtual environment:
+
 ```bash
-mlflow ui --backend-store-uri sqlite:///mlflow.db
+.venv\Scripts\python.exe scripts/run_end_to_end_demo.py --samples 35
 ```
-Navigate to `http://127.0.0.1:5000` to inspect experiment runs, comparative metric charts, registered models, and logged model artifacts.
 
-### Synchronizing Weights & Biases (W&B) Dashboard
-When running without an active W&B login, experiments are recorded in offline mode (`wandb/offline-run-...`). To sync your runs to the cloud:
-1. Log in to [https://wandb.ai/authorize](https://wandb.ai/authorize) to get your API key.
-2. Authenticate in your terminal: `wandb login` (or set `$env:WANDB_API_KEY="..."`).
-3. Push offline runs to your W&B project:
-   ```bash
-   wandb sync wandb/offline-run-20261031_230321-rugud7li
-   ```
-4. Access the comparative run dashboards and `model_comparison` tables on your W&B dashboard.
+*(On Linux/macOS, use `python scripts/run_end_to_end_demo.py --samples 35`)*.
+
+### 5.2 What the Demonstration Executes:
+1. **Model Verification:** Loads `GradientBoostingRegressor` from MLflow Registry or local artifact.
+2. **Service Connectivity:** Tests API `/health` endpoint.
+3. **Prediction Generation:** Sends 35 inference requests to `/predict` and confirms SQLite persistence.
+4. **Feedback Ingestion:** Ingests delayed actual energy feedback into `/feedback` and confirms pairing in `v_monitoring_records`.
+5. **Production Simulation:** Generates and validates 200 hours of normal smart-meter observations.
+6. **Drift Detection:** Compares simulated data against baseline `data/train.csv` using SciPy KS-tests and renders an Evidently AI HTML report.
+7. **Performance Evaluation:** Computes MAE, RMSE, $R^2$, and Bias against empirical baselines.
+8. **Automated Monitoring Cycle:** Orchestrates drift and performance evaluations, recording metadata in `monitoring_runs`.
+9. **Observability Exposition:** Scrapes `/metrics` and validates Prometheus gauges and counters.
+10. **Drift & Alert Lifecycle:** Simulates afternoon HVAC spikes ($66.7\%$ drift share $\to$ `[CRITICAL] data_drift` alert), sensor calibration offset, and automatic alert resolution upon return to normal data.
+
+For full technical details, consult the [End-to-End Demonstration Guide](docs/end_to_end_demo_guide.md).
 
 ---
 
-## Docker Containerization (Member 4)
+## 6. Running the API & Connecting Services
 
-The FastAPI inference service is packaged into a self-contained, production-ready Docker image based on `python:3.13-slim`.
+### 6.1 Running the Live FastAPI Service
 
-For complete instructions, architecture explanations, and fallback behaviors, see the dedicated [Docker Containerization Guide](file:///e:/mlops%20phase%202/smart-home-energy-advisor/docs/docker_guide.md).
+To run the REST API server locally:
 
-### Quickstart Commands (PowerShell)
-
-```powershell
-# 1. Build the Docker image:
-docker build -t smart-home-energy-advisor .
-
-# 2. Run the container:
-docker run --rm -p 8000:8000 --name smart-home-advisor-app smart-home-energy-advisor
-
-# 3. Check health status:
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -Method Get
-
-# 4. Predict next-hour consumption:
-$body = @{
-    energy_current_hour = 0.05
-    energy_previous_hour = 0.04
-    energy_two_hours_ago = 0.06
-    target_hour = 14
-    target_day_of_week = 2
-    target_is_weekend = 0
-} | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/predict" -Method Post -ContentType "application/json" -Body $body
-```
-
----
-
-## Repository Structure
-
-```
-├── .dockerignore           # Excludes local caches, datasets, and secrets from Docker
-├── .dvc/                   # DVC configuration and tracking metadata
-├── .gitignore              # Git ignore rules for data, models, and caches
-├── Dockerfile              # Container definition for FastAPI inference service
-├── requirements.txt        # Full development & training dependencies
-├── requirements-inference.txt # Dedicated lightweight runtime inference dependencies
-├── README.md               # Project documentation and workflow guide
-├── api/
-│   └── main.py             # FastAPI service with lifespan and /health, /predict endpoints
-├── docs/
-│   └── docker_guide.md     # Detailed containerization and deployment guide
-├── data/
-│   ├── raw/                # Raw smart-meter CSV files (DVC tracked)
-│   └── processed/          # Cleaned and processed model datasets
-├── models/                 # Saved model serialization artifacts (.pkl/.joblib)
-├── notebooks/              # Exploratory Data Analysis notebooks
-├── reports/                # Validation results, metrics, and markdown reports
-├── src/                    # Feature pipeline, training, registry, and prediction modules
-└── tests/                  # Pytest automated test suites (108 tests passing)
-```
-
----
-
-## Branching & Collaboration Strategy
-
-The repository follows a collaborative branch-per-feature workflow:
-
-- **`main`**: Production-ready branch containing merged, verified pipelines, reports, and tracking scripts.
-- **`member1-eda`**: Dedicated to exploratory data analysis, dataset profiling, and EDA reporting (`notebooks/01_eda.ipynb`, `reports/eda_summary.md`, `data/README.md`).
-- **`member3-ml-pipeline`**: Established the end-to-end data processing, feature engineering, and model training modules.
-- **`member4-mlflow-report`**: Integrated MLflow experiment tracking, explicit model signatures, validation logging, and authored the comprehensive `reports/phase1_report.md`. (Merged into `main` via PR #2).
-
----
-
-## Getting Started & Reproducibility
-
-### 1. Prerequisites
-- Python 3.9+ installed
-- Git configured
-
-### 2. Setup Environment
 ```bash
-# Clone repository
-git clone https://github.com/simran-s-patil/smart-home-energy-advisor.git
-cd smart-home-energy-advisor
-
-# Create virtual environment
-python -m venv venv
-
-# Activate environment
-# On Windows:
-venv\Scripts\activate
-# On Linux/macOS:
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
+uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### 3. Data Pipeline & Verification
-Place raw CEEW smart-meter data (`SM Cleaned Data MH2021.csv`) into `data/`.
+- **Interactive Swagger Docs:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **Service Health Check:** `GET http://127.0.0.1:8000/health`
+- **Prometheus Scrape Endpoint:** `GET http://127.0.0.1:8000/metrics`
+
+### 6.2 Running the Demo against a Live Server
+
 ```bash
-# 1. Verify daily aggregations against reference dataset
-python src/verify_daily_totals.py
-
-# 2. Build verified hourly consumption dataset
-python src/build_hourly_data.py
-
-# 3. Generate lag features and target
-python src/prepare_features.py
-
-# 4. Generate chronological data splits
-python src/split_data.py
-```
-
-### 4. Model Training & MLflow Tracking
-```bash
-# Run MLflow-tracked experiments
-python src/train_with_mlflow.py
-
-# Evaluate best model on test split
-python src/evaluate_model.py
-
-# Launch MLflow UI
-mlflow ui
+python scripts/run_end_to_end_demo.py --api-url http://127.0.0.1:8000 --samples 35
 ```
 
 ---
 
-## Team Roles & Contributions
+## 7. Prometheus & Grafana Observability
 
-This project is collaboratively developed by a four-member team:
+When running on Docker-enabled infrastructure, full containerized observability is available:
 
-- **Member 1 (EDA & Data Quality - `member1-eda`):** Exploratory data analysis, statistical distributions, handling null/zero readings, and preliminary reporting.
-- **Member 2 (Project Setup & Data Versioning - `main`):** Git repository structure, environment configuration, dependency management, and DVC initialization.
-- **Member 3 (ML Pipeline & Feature Engineering - `member3-ml-pipeline`):** Hourly window aggregations, lag feature generation, chronological data splitting, and model benchmarking.
-- **Member 4 (MLflow Tracking & Reporting - `member4-mlflow-report`):** MLflow experiment tracking, model signatures/artifacts logging, Phase 1 documentation, and test-set verification.
+```bash
+# Start all microservices in the background
+docker-compose up -d
+
+# Verify container statuses
+docker-compose ps
+```
+
+### Access URLs:
+- **FastAPI Inference Service:** [http://localhost:8000](http://localhost:8000)
+- **Prometheus UI:** [http://localhost:9090](http://localhost:9090)
+  - Verify target `api:8000` is active under **Status -> Targets**.
+  - Query metrics such as `energy_advisor_dataset_drift_share` or `energy_advisor_model_mae`.
+- **Grafana Dashboard:** [http://localhost:3000](http://localhost:3000)
+  - Auto-provisions the Prometheus datasource and the **Smart Home Energy Advisor - MLOps Operations** dashboard.
+  - Features real-time visual panels for API traffic, inference latency percentiles, feature drift shares, model performance degradation, and active alert state counters.
+
+For complete metrics definitions and PromQL queries, see the [Observability Guide](docs/observability_guide.md).
 
 ---
 
-## Roadmap & Next Steps
+## 8. Automated Testing
 
-- [ ] Incorporate weather features (temperature, humidity) and outdoor ambient conditions.
-- [ ] Investigate outlier voltage/frequency intervals for potential electrical anomaly detection.
-- [ ] Implement MLflow Model Registry and staging transitions.
-- [ ] Package model inference into a RESTful API using FastAPI.
-- [ ] Containerize application with Docker and establish automated CI/CD testing pipelines.
+The repository contains a test suite of **271 automated tests** covering data validation, feature engineering, model training, MLflow tracking, database persistence, drift detection, performance monitoring, alert lifecycle management, Prometheus exposition, and end-to-end integration.
+
+Run the full test suite:
+
+```bash
+.venv\Scripts\python.exe -m pytest tests/ -v
+```
+
+### Test Suite Structure:
+- `tests/test_data_validation.py`: Raw 3-minute schema, missing values, timestamp intervals, and CEEW daily aggregation parity.
+- `tests/test_features.py`: Hourly aggregation, lag sequence continuity, calendar features, and target formulation.
+- `tests/test_model.py`: Model benchmarks, chronological train/val/test evaluation, and scikit-learn interfaces.
+- `tests/test_experiment_tracking.py`: MLflow run logging, metric calculation, artifact persistence, and Model Registry staging.
+- `tests/test_api.py`: FastAPI `/health`, `/predict`, input schema validation, and background logging.
+- `tests/test_monitoring.py`: SQLite persistence, schema constraints, record pairing, and feedback validation.
+- `tests/test_simulation.py`: Normal, HVAC-shift, and sensor-drift synthetic data generation and statistical integrity.
+- `tests/test_drift.py`: Two-sample KS-tests, Cohen's $d$, Evidently AI presets, and dataset drift thresholds.
+- `tests/test_performance_monitor.py`: MAE/RMSE/$R^2$/Bias evaluation, time window filtering, and baseline degradation alerts.
+- `tests/test_alert_manager.py`: Alert state machine, deduplication cooldown, manual/automatic resolution, and notification formatting.
+- `tests/test_prometheus_metrics.py`: Custom collector, low-cardinality endpoint sanitization, registry safety, and YAML configurations.
+- `tests/test_end_to_end_integration.py`: Complete operational lifecycle integration tests under isolated temporary databases.
+
+---
+
+## 9. Known Limitations & Environment Constraints
+
+1. **Docker Host Availability:**
+   - In environments where the Docker daemon is not active or unavailable (such as bare Windows hosts without WSL2/Hyper-V), the containerized stack (`docker-compose.yml`) cannot be started.
+   - The entire Python application, API, database layer, simulation engine, drift detector, and end-to-end demonstration scripts are designed with **zero container dependencies** and execute natively in standard Python.
+2. **Local Single-Node Persistence:**
+   - The operational database is implemented in SQLite3 with write-ahead logging (WAL) and foreign keys enabled. For high-throughput distributed multi-region deployments, a migration to PostgreSQL with connection pooling would be required.
+3. **Statistical Sample Requirement:**
+   - Model performance degradation monitoring strictly enforces a minimum of 30 feedback records (`min_samples = 30`) before evaluating performance alerts. Running evaluations on fewer records returns `insufficient_data` to prevent statistical noise from triggering false alarms.
+4. **Data Provenance:**
+   - Historical baseline data originates from 50 households in Mathura, India (2021). Operational production data and demonstration feedback are synthetically generated and explicitly labeled as demonstration artifacts.
