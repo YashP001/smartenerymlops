@@ -18,6 +18,8 @@ wandb/
 
 # Generated pipeline data files (raw tracked via DVC)
 data/*.csv
+!data/train.csv
+!data/test.csv
 data/processed/*.csv
 
 # Monitoring database and logs
