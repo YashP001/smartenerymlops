@@ -35,6 +35,10 @@ reports/drift/*.html
 reports/drift/*.json
 !reports/drift/.gitkeep
 
+# Performance monitoring reports
+reports/performance/*.json
+!reports/performance/.gitkeep
+
 # Secrets
 .env
 
