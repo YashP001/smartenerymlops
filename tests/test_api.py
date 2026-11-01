@@ -63,6 +63,57 @@ class TestHealthEndpoint:
         assert isinstance(data["model_loaded"], bool)
 
 
+# ─── Readiness endpoint tests ───────────────────────────────────────
+
+class TestReadinessEndpoint:
+    """Tests for the GET /ready readiness probe endpoint."""
+
+    def test_ready_returns_200_when_model_loaded(self, client):
+        response = client.get("/ready")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ready"
+        assert data["model_loaded"] is True
+        assert data["model_version"] == "GradientBoostingRegressor"
+        assert isinstance(data["database_initialized"], bool)
+
+    def test_ready_returns_503_when_model_unavailable(self, monkeypatch):
+        # Force model to None
+        monkeypatch.setattr("api.main.model", None)
+        with patch("api.main.load_model", side_effect=Exception("Failed to load model")):
+            with TestClient(app) as test_client:
+                test_client.app.state.model = None
+                response = test_client.get("/ready")
+                assert response.status_code == 503
+                detail = response.json()["detail"]
+                assert detail["status"] == "not_ready"
+                assert detail["model_loaded"] is False
+
+    def test_ready_returns_503_when_database_unavailable(self, monkeypatch):
+        # Simulate model successfully loaded but database initialization failed
+        with TestClient(app) as test_client:
+            test_client.app.state.database_initialized = False
+            response = test_client.get("/ready")
+            assert response.status_code == 503
+            detail = response.json()["detail"]
+            assert detail["status"] == "not_ready"
+            assert detail["model_loaded"] is True
+            assert detail["database_initialized"] is False
+            assert "database is unavailable" in detail["message"].lower()
+
+    def test_health_still_returns_200_when_model_unavailable(self, monkeypatch):
+        # /health remains 200 even if model is not loaded (liveness contract)
+        monkeypatch.setattr("api.main.model", None)
+        with patch("api.main.load_model", side_effect=Exception("Failed to load model")):
+            with TestClient(app) as test_client:
+                test_client.app.state.model = None
+                response = test_client.get("/health")
+                assert response.status_code == 200
+                data = response.json()
+                assert data["status"] == "healthy"
+                assert data["model_loaded"] is False
+
+
 # ─── Predict endpoint tests ─────────────────────────────────────────
 
 class TestPredictEndpoint:

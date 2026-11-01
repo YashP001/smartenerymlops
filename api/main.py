@@ -81,8 +81,10 @@ async def lifespan(app: FastAPI):
     global model
     try:
         init_db()
+        app.state.database_initialized = True
         print("Monitoring persistence layer initialized.")
     except Exception as e:
+        app.state.database_initialized = False
         print(f"Monitoring DB initialization notice: {e}")
 
     try:
@@ -97,6 +99,7 @@ async def lifespan(app: FastAPI):
     yield
     app.state.model = None
     model = None
+    app.state.database_initialized = False
 
 
 # ─── FastAPI application ─────────────────────────────────────────────
@@ -253,6 +256,15 @@ class HealthResponse(BaseModel):
     )
 
 
+class ReadinessResponse(BaseModel):
+    """Readiness check response indicating operational prediction capability."""
+
+    status: str = Field(..., description="Service readiness status")
+    model_loaded: bool = Field(..., description="Whether the model is ready for predictions")
+    model_version: Optional[str] = Field(None, description="Active model version name")
+    database_initialized: bool = Field(..., description="Whether SQLite monitoring store is initialized")
+
+
 # ─── Endpoints ───────────────────────────────────────────────────────
 
 @app.get("/health", response_model=HealthResponse)
@@ -262,6 +274,50 @@ def health_check():
     return HealthResponse(
         status="healthy",
         model_loaded=active_model is not None,
+    )
+
+
+@app.get("/ready", response_model=ReadinessResponse)
+def readiness_check():
+    """Verify that the model is loaded and the service is ready to serve predictions.
+
+    Returns HTTP 200 when the model is operational, or HTTP 503 when the model
+    is unavailable and predictions cannot be served.
+    """
+    active_model = get_active_model()
+    db_initialized = bool(getattr(app.state, "database_initialized", False))
+
+    if active_model is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "not_ready",
+                "model_loaded": False,
+                "model_version": None,
+                "database_initialized": db_initialized,
+                "message": "Model is not loaded. Predictions unavailable.",
+            },
+        )
+
+    if not db_initialized:
+        model_name = getattr(active_model, "__class__", type(active_model)).__name__
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "not_ready",
+                "model_loaded": True,
+                "model_version": model_name,
+                "database_initialized": False,
+                "message": "Monitoring database is unavailable. Predictions and feedback cannot be persisted.",
+            },
+        )
+
+    model_name = getattr(active_model, "__class__", type(active_model)).__name__
+    return ReadinessResponse(
+        status="ready",
+        model_loaded=True,
+        model_version=model_name,
+        database_initialized=True,
     )
 
 

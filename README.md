@@ -163,6 +163,14 @@ uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
 python scripts/run_end_to_end_demo.py --api-url http://127.0.0.1:8000 --samples 35
 ```
 
+### 6.3 Cloud Deployment on Render (Phase 3.8)
+
+- **Deployment Status:** **Deployment configuration prepared; public deployment pending.**
+- **Service Blueprint:** Declarative [`render.yaml`](render.yaml) and Python runtime pin [`.python-version`](.python-version) (`3.11.9`) are configured for zero-overhead Native Python execution.
+- **Service Architecture:** Single-worker asynchronous Uvicorn server running on `0.0.0.0:$PORT` using dedicated runtime dependencies ([`requirements-inference.txt`](requirements-inference.txt)).
+- **Readiness Verification:** Render probes `GET /ready`, which returns HTTP 200 only when both the local model checkpoint (`models/gradient_boosting.pkl`) is loaded and the SQLite monitoring database is initialized.
+- **Detailed Instructions:** See the comprehensive [Render Deployment Guide](docs/render_deployment_guide.md) for step-by-step setup, endpoint testing, and operational characteristics (including free-tier cold starts and ephemeral storage).
+
 ---
 
 ## 7. Prometheus & Grafana Observability
