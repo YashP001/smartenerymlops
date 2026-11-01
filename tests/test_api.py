@@ -41,6 +41,32 @@ def valid_payload():
     }
 
 
+# ─── Root homepage tests ─────────────────────────────────────────────
+
+class TestRootHomepage:
+    """Tests for the GET / root landing page endpoint."""
+
+    def test_root_returns_200_html(self, client):
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "text/html" in response.headers.get("content-type", "")
+
+    def test_root_contains_project_name_and_description(self, client):
+        response = client.get("/")
+        content = response.text
+        assert "Smart Home Energy Advisor" in content
+        assert "An ML-powered application that predicts the next hour's energy consumption" in content
+        assert "API is Running &amp; Operational" in content or "API is Running" in content
+
+    def test_root_contains_working_links_to_endpoints(self, client):
+        response = client.get("/")
+        content = response.text
+        assert 'href="/docs"' in content
+        assert 'href="/health"' in content
+        assert 'href="/ready"' in content
+        assert 'href="/metrics"' in content
+
+
 # ─── Health endpoint tests ───────────────────────────────────────────
 
 class TestHealthEndpoint:

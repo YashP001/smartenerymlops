@@ -23,6 +23,7 @@ import time
 import uuid
 from typing import Optional
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from src.predict import load_model, predict
@@ -266,6 +267,192 @@ class ReadinessResponse(BaseModel):
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+def root_homepage():
+    """Render a clean, responsive landing page for the Smart Home Energy Advisor service."""
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Home Energy Advisor</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-hover: #0ea5e9;
+      --success: #10b981;
+      --border: #334155;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .container {
+      max-width: 680px;
+      width: 100%;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2.5rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(16, 185, 129, 0.12);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-bottom: 1.25rem;
+    }
+    .pulse {
+      width: 8px;
+      height: 8px;
+      background: var(--success);
+      border-radius: 50%;
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      animation: pulse-ring 2s infinite;
+    }
+    @keyframes pulse-ring {
+      0% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      }
+      70% {
+        box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+      }
+      100% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+      }
+    }
+    h1 {
+      font-size: 1.875rem;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.025em;
+    }
+    .description {
+      color: var(--text-muted);
+      font-size: 1.05rem;
+      line-height: 1.6;
+      margin-bottom: 2rem;
+    }
+    .links-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.875rem;
+      margin-bottom: 2rem;
+    }
+    .card-link {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem 0.75rem;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-main);
+      text-decoration: none;
+      font-weight: 500;
+      transition: all 0.2s ease-in-out;
+    }
+    .card-link:hover {
+      border-color: var(--accent);
+      background: rgba(56, 189, 248, 0.08);
+      color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .card-link .endpoint-path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .card-link .endpoint-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+    .footer {
+      border-top: 1px solid var(--border);
+      padding-top: 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="badge">
+      <span class="pulse"></span>
+      API is Running &amp; Operational
+    </div>
+    <h1>Smart Home Energy Advisor</h1>
+    <p class="description">
+      An ML-powered application that predicts the next hour's energy consumption from residential smart-meter telemetry.
+    </p>
+
+    <div class="links-grid">
+      <a href="/docs" class="card-link" id="link-docs">
+        <span class="endpoint-path">/docs</span>
+        <span class="endpoint-label">Swagger UI</span>
+      </a>
+      <a href="/health" class="card-link" id="link-health">
+        <span class="endpoint-path">/health</span>
+        <span class="endpoint-label">Liveness Probe</span>
+      </a>
+      <a href="/ready" class="card-link" id="link-ready">
+        <span class="endpoint-path">/ready</span>
+        <span class="endpoint-label">Readiness Probe</span>
+      </a>
+      <a href="/metrics" class="card-link" id="link-metrics">
+        <span class="endpoint-path">/metrics</span>
+        <span class="endpoint-label">Prometheus Metrics</span>
+      </a>
+    </div>
+
+    <div class="footer">
+      <span>AI-Assisted Smart Home Energy Advisor (v1.0.0)</span>
+      <span>Model: GradientBoostingRegressor</span>
+    </div>
+  </div>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html_content, status_code=200)
+
 
 @app.get("/health", response_model=HealthResponse)
 def health_check():
