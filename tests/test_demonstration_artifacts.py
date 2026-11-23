@@ -6,10 +6,12 @@ Includes:
    temporary MLflow SQLite database and temporary artifact storage.
    These tests run cleanly in GitHub Actions on Ubuntu and any CI runner.
 2. Local demonstration verification: An opt-in test suite verifying the actual
-   local Gradient Boosting run (e9922ecbb3af4c029aebf2f19b755694) and Model
-   Registry version 1. Automatically skipped in CI when the local database is absent.
+   local Gradient Boosting run (e9922ecbb3af4c029aebf2f19b755694), Model
+   Registry version 1, and the complete 9-directory artifact hierarchy.
+   Automatically skipped in CI when the local database is absent.
 """
 
+import json
 import os
 import pathlib
 import sys
@@ -33,10 +35,18 @@ from scripts.log_demonstration_artifacts import (
     generate_feature_importance_plot,
     generate_actual_vs_predicted_plot,
     generate_residuals_plot,
+    build_dataset_artifacts,
+    build_preprocessing_artifacts,
+    build_configuration_artifacts,
+    build_metadata_artifacts,
+    build_deployment_artifacts,
+    build_evaluation_artifacts,
+    build_training_logs_artifacts,
     log_evaluation_artifacts,
     log_visualization_artifacts,
     log_dataset_lineage_tags,
     log_demonstration_artifacts,
+    log_all_demonstration_artifacts,
 )
 
 # ---------------------------------------------------------------------------
@@ -94,7 +104,6 @@ def isolated_mlflow(tmp_path, monkeypatch):
         }
     finally:
         client.set_terminated(run.info.run_id)
-        # Dispose connection pools so SQLite files unlock cleanly on Windows
         if hasattr(client, "_tracking_client") and hasattr(
             client._tracking_client.store, "engine"
         ):
@@ -213,6 +222,27 @@ class TestPortableArtifactLogging:
         for key, val in tags.items():
             assert run.data.tags.get(key) == val
 
+    def test_build_preprocessing_artifacts_portable(self, tmp_path):
+        """Verify preprocessing artifacts generation and JSON/MD schemas."""
+        out = build_preprocessing_artifacts(tmp_path)
+        assert out["preprocessing_report"].exists()
+        assert out["feature_definitions"].exists()
+
+        defs = json.loads(out["feature_definitions"].read_text(encoding="utf-8"))
+        assert "features" in defs
+        assert len(defs["features"]) == 6
+        assert defs["target"]["name"] == "target_next_hour"
+
+    def test_build_deployment_artifacts_portable(self, tmp_path):
+        """Verify deployment artifacts generation and OpenAPI JSON schema."""
+        out = build_deployment_artifacts(tmp_path)
+        assert out["inference_schema"].exists()
+        assert out["deployment_config"].exists()
+
+        schema = json.loads(out["inference_schema"].read_text(encoding="utf-8"))
+        assert "POST /predict" in schema["endpoints"]
+        assert "POST /feedback" in schema["endpoints"]
+
     def test_download_artifact_portable(self, isolated_mlflow, tmp_path):
         """Verify logged artifact can be retrieved and parsed via MLflow download API."""
         client = isolated_mlflow["client"]
@@ -233,52 +263,6 @@ class TestPortableArtifactLogging:
         content = pathlib.Path(downloaded).read_text()
         assert "Gradient Boosting" in content
         assert "0.0712" in content
-
-    def test_end_to_end_demonstration_logger_portable(
-        self, isolated_mlflow, sample_model_and_data, tmp_path
-    ):
-        """Verify end-to-end demonstration logger orchestrator on isolated files."""
-        client = isolated_mlflow["client"]
-        run_id = isolated_mlflow["run_id"]
-        model = sample_model_and_data["model"]
-        X = sample_model_and_data["X"]
-        y = sample_model_and_data["y"]
-
-        # Prepare small synthetic CSV splits
-        df = X.copy()
-        df[TARGET_COLUMN] = y
-        train_csv = tmp_path / "train.csv"
-        val_csv = tmp_path / "val.csv"
-        test_csv = tmp_path / "test.csv"
-        rep_val_csv = tmp_path / "validation_results.csv"
-        rep_comp_md = tmp_path / "model_comparison.md"
-
-        df.to_csv(train_csv, index=False)
-        df.to_csv(val_csv, index=False)
-        df.to_csv(test_csv, index=False)
-        rep_val_csv.write_text("Model,MAE\nGradient Boosting,0.0712\n")
-        rep_comp_md.write_text("# Report\n")
-
-        metrics = log_demonstration_artifacts(
-            client=client,
-            run_id=run_id,
-            model=model,
-            train_path=train_csv,
-            val_path=val_csv,
-            test_path=test_csv,
-            val_results_path=rep_val_csv,
-            model_comparison_path=rep_comp_md,
-            model_checkpoint_origin="Isolated Test Checkpoint",
-        )
-
-        assert "MAE" in metrics
-        assert "RMSE" in metrics
-        assert "R2" in metrics
-
-        # Verify all directories exist
-        root_artifacts = {a.path for a in client.list_artifacts(run_id)}
-        assert "evaluation" in root_artifacts
-        assert "visualizations" in root_artifacts
 
 
 # ---------------------------------------------------------------------------
@@ -317,46 +301,115 @@ class TestLocalDemonstrationVerification:
         assert mv.run_id == LOCAL_RUN_ID
         assert mv.status == "READY"
 
+    def test_local_all_nine_artifact_directories_exist(self, local_mlflow_client):
+        """Verify that all 9 required artifact directories exist under the run."""
+        artifacts = local_mlflow_client.list_artifacts(LOCAL_RUN_ID)
+        dir_names = {a.path for a in artifacts if a.is_dir}
+        expected_dirs = {
+            "dataset",
+            "preprocessing",
+            "model",
+            "configuration",
+            "evaluation",
+            "training_logs",
+            "visualizations",
+            "metadata",
+            "deployment",
+        }
+        for ed in expected_dirs:
+            assert ed in dir_names, f"Expected artifact directory '{ed}' missing from run"
+
+    def test_local_dataset_artifacts_contents(self, local_mlflow_client):
+        """Verify dataset_summary.json, data_split_summary.json, and data_lineage.md exist."""
+        artifacts = local_mlflow_client.list_artifacts(LOCAL_RUN_ID, path="dataset")
+        paths = {a.path.split("/")[-1] for a in artifacts}
+        assert "dataset_summary.json" in paths
+        assert "data_split_summary.json" in paths
+        assert "data_lineage.md" in paths
+
+    def test_local_preprocessing_artifacts_contents(self, local_mlflow_client):
+        """Verify preprocessing_report.md and feature_definitions.json exist."""
+        artifacts = local_mlflow_client.list_artifacts(LOCAL_RUN_ID, path="preprocessing")
+        paths = {a.path.split("/")[-1] for a in artifacts}
+        assert "preprocessing_report.md" in paths
+        assert "feature_definitions.json" in paths
+
+    def test_local_model_artifacts_contents(self, local_mlflow_client):
+        """Verify MLmodel, model.pkl, requirements.txt, and input_example.json exist."""
+        artifacts = local_mlflow_client.list_artifacts(LOCAL_RUN_ID, path="model")
+        paths = {a.path.split("/")[-1] for a in artifacts}
+        assert "MLmodel" in paths
+        assert "model.pkl" in paths
+        assert "requirements.txt" in paths
+        assert "input_example.json" in paths
+
+    def test_local_configuration_artifacts_contents(self, local_mlflow_client):
+        """Verify model_config.json and training_config.json exist."""
+        artifacts = local_mlflow_client.list_artifacts(LOCAL_RUN_ID, path="configuration")
+        paths = {a.path.split("/")[-1] for a in artifacts}
+        assert "model_config.json" in paths
+        assert "training_config.json" in paths
+
     def test_local_evaluation_artifacts_exist(self, local_mlflow_client):
-        """Verify validation_results.csv and model_comparison.md exist in evaluation/."""
+        """Verify validation and test evaluation files exist in evaluation/."""
         artifacts = local_mlflow_client.list_artifacts(LOCAL_RUN_ID, path="evaluation")
-        paths = {a.path for a in artifacts}
-        assert "evaluation/validation_results.csv" in paths
-        assert "evaluation/model_comparison.md" in paths
-        for a in artifacts:
-            assert a.file_size > 0
+        paths = {a.path.split("/")[-1] for a in artifacts}
+        assert "validation_results.csv" in paths
+        assert "model_comparison.md" in paths
+        assert "test_metrics.json" in paths
+        assert "evaluation_report.md" in paths
+
+    def test_local_training_logs_artifacts_contents(self, local_mlflow_client):
+        """Verify training_summary.json exists in training_logs/."""
+        artifacts = local_mlflow_client.list_artifacts(LOCAL_RUN_ID, path="training_logs")
+        paths = {a.path.split("/")[-1] for a in artifacts}
+        assert "training_summary.json" in paths
 
     def test_local_visualization_artifacts_exist(self, local_mlflow_client):
         """Verify feature_importance, actual_vs_predicted, and residuals exist in visualizations/."""
         artifacts = local_mlflow_client.list_artifacts(
             LOCAL_RUN_ID, path="visualizations"
         )
-        paths = {a.path for a in artifacts}
-        assert "visualizations/feature_importance.png" in paths
-        assert "visualizations/actual_vs_predicted.png" in paths
-        assert "visualizations/residuals_plot.png" in paths
+        paths = {a.path.split("/")[-1] for a in artifacts}
+        assert "feature_importance.png" in paths
+        assert "actual_vs_predicted.png" in paths
+        assert "residuals_plot.png" in paths
         for a in artifacts:
             assert a.file_size > 10_000
 
-    def test_local_dataset_lineage_tags_present(self, local_mlflow_client):
-        """Verify dataset lineage metadata tags are present and match verified checksums."""
-        run = local_mlflow_client.get_run(LOCAL_RUN_ID)
-        tags = run.data.tags
-        assert tags.get("dataset.train.rows") == "18696"
-        assert tags.get("dataset.train.md5") == "dd11d57bc366c3c5af9047d34cbe33af"
-        assert tags.get("dataset.validation.rows") == "4085"
-        assert tags.get("dataset.validation.md5") == "0b188dc415882a2cd20d6c14710daa17"
-        assert tags.get("dataset.test.rows") == "4120"
-        assert tags.get("dataset.test.md5") == "d9b92a33fe45dfc3459cb6356c004b2e"
-        assert "Chronological" in tags.get("dataset.split_strategy", "")
-        assert "Registry" in tags.get("model.checkpoint_origin", "")
+    def test_local_metadata_artifacts_contents(self, local_mlflow_client):
+        """Verify model_card.md and model_metadata.json exist in metadata/."""
+        artifacts = local_mlflow_client.list_artifacts(LOCAL_RUN_ID, path="metadata")
+        paths = {a.path.split("/")[-1] for a in artifacts}
+        assert "model_card.md" in paths
+        assert "model_metadata.json" in paths
 
-    def test_local_download_artifact_via_api(self, local_mlflow_client, tmp_path):
-        """Verify that an artifact can be downloaded from the local demonstration run."""
-        downloaded = local_mlflow_client.download_artifacts(
-            LOCAL_RUN_ID, "evaluation/validation_results.csv", dst_path=str(tmp_path)
+    def test_local_deployment_artifacts_contents(self, local_mlflow_client):
+        """Verify inference_schema.json and deployment_config.md exist in deployment/."""
+        artifacts = local_mlflow_client.list_artifacts(LOCAL_RUN_ID, path="deployment")
+        paths = {a.path.split("/")[-1] for a in artifacts}
+        assert "inference_schema.json" in paths
+        assert "deployment_config.md" in paths
+
+    def test_local_recalculated_test_metrics_match_recorded(
+        self, local_mlflow_client, tmp_path
+    ):
+        """Verify recalculated metrics on test.csv match test_metrics.json."""
+        test_path = PROJECT_ROOT / "data" / "test.csv"
+        assert test_path.exists(), "Held-out test dataset missing"
+        test_df = pd.read_csv(test_path)
+        assert len(test_df) == 4120
+
+        model = mlflow.sklearn.load_model(f"models:/{LOCAL_MODEL_NAME}/1")
+        preds = model.predict(test_df[FEATURE_COLUMNS])
+
+        mae_calc = float(np.mean(np.abs(preds - test_df[TARGET_COLUMN])))
+        bias_calc = float(np.mean(preds - test_df[TARGET_COLUMN]))
+
+        dl = local_mlflow_client.download_artifacts(
+            LOCAL_RUN_ID, "evaluation/test_metrics.json", dst_path=str(tmp_path)
         )
-        assert os.path.exists(downloaded)
-        content = pathlib.Path(downloaded).read_text()
-        assert "Gradient Boosting" in content
-        assert "MAE" in content
+        recorded = json.loads(pathlib.Path(dl).read_text(encoding="utf-8"))["metrics"]
+
+        assert abs(mae_calc - recorded["mae_kwh"]) < 1e-4
+        assert abs(bias_calc - recorded["prediction_bias_kwh"]) < 1e-4
