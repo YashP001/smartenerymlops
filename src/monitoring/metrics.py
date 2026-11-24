@@ -112,6 +112,35 @@ class MonitoringMetricsCollector:
         perf_failures.add_metric([], stats.get("performance_failures_total", 0))
         yield perf_failures
 
+        # Batch status and freshness are absent until actually observed.
+        for key, name, description in [
+            ("latest_dataset_drift", "dataset_drift_detected", "Whether the latest dataset evaluation detected input drift."),
+            ("latest_drifted_features_count", "drifted_features_count", "Number of drifted canonical input features."),
+            ("latest_cycle_timestamp", "monitoring_last_cycle_timestamp_seconds", "Unix timestamp of the latest monitoring cycle."),
+            ("latest_success_timestamp", "monitoring_last_success_timestamp_seconds", "Unix timestamp of the latest cycle with both evaluations successful."),
+        ]:
+            if stats.get(key) is not None:
+                metric = GaugeMetricFamily(f"energy_advisor_{name}", description)
+                metric.add_metric([], float(stats[key]))
+                yield metric
+        if stats.get("latest_scenario"):
+            metric = GaugeMetricFamily(
+                "energy_advisor_monitoring_scenario_info", "Latest monitoring scenario.", labels=["scenario"]
+            )
+            metric.add_metric([stats["latest_scenario"]], 1)
+            yield metric
+        for key, name, description in [
+            ("latest_r2", "model_r2", "Latest model R squared on paired feedback."),
+            ("latest_bias", "model_bias_kwh", "Latest mean prediction minus actual in kWh."),
+            ("latest_sample_count", "performance_sample_count", "Number of paired feedback records in the latest evaluation."),
+        ]:
+            values = stats.get(key, {})
+            if values:
+                metric = GaugeMetricFamily(f"energy_advisor_{name}", description, labels=["model_version"])
+                for version, value in values.items():
+                    metric.add_metric([version], value)
+                yield metric
+
         # 6. Current MAE and RMSE (only emitted when sufficient feedback exists)
         latest_mae = stats.get("latest_mae", {})
         if latest_mae:
@@ -137,6 +166,9 @@ class MonitoringMetricsCollector:
 
         # 7. Active alerts grouped by alert_type and severity
         active_alerts = stats.get("active_alerts", {})
+        total = GaugeMetricFamily("energy_advisor_active_alerts_total", "Total currently active monitoring alerts.")
+        total.add_metric([], sum(active_alerts.values()))
+        yield total
         alert_gauge = GaugeMetricFamily(
             "energy_advisor_active_alerts",
             "Current count of active monitoring alerts grouped by alert type and severity.",

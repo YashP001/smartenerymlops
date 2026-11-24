@@ -59,6 +59,13 @@ def run_monitoring_cycle(
     cooldown_seconds: Optional[int] = None,
     save_reports: bool = False,
     output_dir: Optional[str] = None,
+    prediction_ids: Optional[List[str]] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    scenario: Optional[str] = None,
+    data_source: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    generate_drift_reports: bool = True,
 ) -> Dict[str, Any]:
     """Execute a single monitoring cycle combining drift, performance, and alerting.
 
@@ -76,8 +83,8 @@ def run_monitoring_cycle(
         Structured summary dictionary of the monitoring cycle.
     """
     cycle_id = f"cycle_{uuid.uuid4().hex[:8]}"
-    start_time = datetime.now(timezone.utc).isoformat()
-    logger.info("Starting monitoring cycle '%s' at %s", cycle_id, start_time)
+    cycle_timestamp = datetime.now(timezone.utc).isoformat()
+    logger.info("Starting monitoring cycle '%s' at %s", cycle_id, cycle_timestamp)
 
     active_db = db_path or get_db_path()
     init_db(active_db)
@@ -85,7 +92,11 @@ def run_monitoring_cycle(
 
     run_summary: Dict[str, Any] = {
         "cycle_id": cycle_id,
-        "timestamp": start_time,
+        "timestamp": cycle_timestamp,
+        "scenario": scenario,
+        "data_source": data_source,
+        "batch_id": batch_id,
+        "evaluation_strategy": "explicit_batch" if prediction_ids is not None else "time_window_or_history",
         "database_path": active_db,
         "model_version": model_version or "all_models",
         "drift_status": "skipped",
@@ -100,13 +111,16 @@ def run_monitoring_cycle(
     }
 
     # ─── 1. Run Data Drift Detection ──────────────────────────────────
-    ref_path = ref_data or DEFAULT_REF_PATH
+    ref_path = ref_data if ref_data is not None else DEFAULT_REF_PATH
     if prod_data is not None:
         try:
             logger.info("Evaluating data drift against reference: %s", ref_path)
             drift_summary = run_drift_analysis(
                 reference_data=ref_path,
                 production_data=prod_data,
+                scenario=scenario or "production",
+                generate_reports=generate_drift_reports,
+                **({"output_dir": os.path.join(output_dir, "drift")} if output_dir else {}),
             )
             run_summary["drift_status"] = "evaluated"
             run_summary["drift_result"] = drift_summary
@@ -156,6 +170,9 @@ def run_monitoring_cycle(
         perf_summary = evaluate_model_performance(
             db_path=active_db,
             model_version=model_version,
+            prediction_ids=prediction_ids,
+            start_time=start_time,
+            end_time=end_time,
         )
         run_summary["performance_status"] = "evaluated"
         run_summary["performance_result"] = perf_summary
@@ -185,11 +202,10 @@ def run_monitoring_cycle(
 
         if save_reports:
             out_dir = output_dir or os.path.join(_PROJECT_ROOT, "reports", "performance")
-            generate_performance_report(
-                db_path=active_db,
-                output_dir=out_dir,
-                model_version=model_version,
-            )
+            # Persist this exact assessment, not a second unbounded history evaluation.
+            os.makedirs(out_dir, exist_ok=True)
+            with open(os.path.join(out_dir, f"{cycle_id}_performance.json"), "w", encoding="utf-8") as stream:
+                json.dump(perf_summary, stream, indent=2)
 
     except Exception as e:
         logger.error("Performance monitoring execution failed: %s", e, exc_info=True)
@@ -219,7 +235,7 @@ def run_monitoring_cycle(
             perf_metrics = perf_res.get("metrics") if isinstance(perf_res.get("metrics"), dict) else perf_res
         log_monitoring_run(
             run_id=cycle_id,
-            timestamp=start_time,
+            timestamp=cycle_timestamp,
             drift_status=run_summary["drift_status"],
             performance_status=run_summary["performance_status"],
             alerts_triggered=len(run_summary["alerts_triggered"]),
@@ -233,6 +249,10 @@ def run_monitoring_cycle(
             bias=perf_metrics.get("bias") if isinstance(perf_metrics, dict) else perf_metrics.get("mean_bias"),
             sample_count=perf_metrics.get("sample_count") if isinstance(perf_metrics, dict) else (perf_res.get("evaluated_predictions") if isinstance(perf_res, dict) else None),
             db_path=active_db,
+            scenario=scenario,
+            data_source=data_source,
+            batch_id=batch_id,
+            details=run_summary,
         )
     except Exception as persist_err:
         logger.warning("Failed to persist monitoring run observability record: %s", persist_err)

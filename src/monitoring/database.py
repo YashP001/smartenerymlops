@@ -52,6 +52,10 @@ def get_connection(db_path: Optional[str] = None):
     conn = sqlite3.connect(path, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
+    # Opt-in for the local demo's Windows bind mount; production keeps SQLite's
+    # default FULL durability. WAL + NORMAL avoids a cross-VM fsync per feedback.
+    if os.getenv("MONITORING_SQLITE_SYNCHRONOUS") == "NORMAL":
+        conn.execute("PRAGMA synchronous = NORMAL;")
     try:
         yield conn
     finally:
@@ -169,8 +173,35 @@ def init_db(db_path: Optional[str] = None) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_monitoring_runs_timestamp ON monitoring_runs(timestamp);
         CREATE INDEX IF NOT EXISTS idx_monitoring_failures_op ON monitoring_execution_failures(operation);
+
+        CREATE TABLE IF NOT EXISTS monitoring_metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
         """)
+        # Additive migration: retain old monitoring databases and every historical row.
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(monitoring_runs)")}
+        for name, sql_type in {
+            "scenario": "TEXT", "data_source": "TEXT", "batch_id": "TEXT",
+            "details_json": "TEXT",
+        }.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE monitoring_runs ADD COLUMN {name} {sql_type}")
+        alert_columns = {row[1] for row in conn.execute("PRAGMA table_info(alerts)")}
+        if "last_notified_at" not in alert_columns:
+            conn.execute("ALTER TABLE alerts ADD COLUMN last_notified_at TEXT")
+        conn.execute(
+            "INSERT OR IGNORE INTO monitoring_metadata(key, value) VALUES ('store_id', ?)",
+            (uuid.uuid4().hex,),
+        )
         conn.commit()
+
+
+def get_store_id(db_path: Optional[str] = None) -> Optional[str]:
+    """Opaque shared-store identity; never exposes the host database path."""
+    with get_connection(db_path) as conn:
+        row = conn.execute("SELECT value FROM monitoring_metadata WHERE key = 'store_id'").fetchone()
+        return row[0] if row else None
 
 
 def log_prediction(
@@ -391,8 +422,9 @@ def save_alert(alert_data: Dict[str, Any], db_path: Optional[str] = None) -> Non
                 updated_at,
                 resolved_at,
                 trigger_count,
-                last_triggered_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                last_triggered_at,
+                last_notified_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(alert_id) DO UPDATE SET
                 status = excluded.status,
                 severity = excluded.severity,
@@ -402,7 +434,8 @@ def save_alert(alert_data: Dict[str, Any], db_path: Optional[str] = None) -> Non
                 updated_at = excluded.updated_at,
                 resolved_at = excluded.resolved_at,
                 trigger_count = excluded.trigger_count,
-                last_triggered_at = excluded.last_triggered_at;
+                last_triggered_at = excluded.last_triggered_at,
+                last_notified_at = excluded.last_notified_at;
             """,
             (
                 alert_data["alert_id"],
@@ -418,6 +451,7 @@ def save_alert(alert_data: Dict[str, Any], db_path: Optional[str] = None) -> Non
                 alert_data.get("resolved_at"),
                 int(alert_data.get("trigger_count", 1)),
                 alert_data.get("last_triggered_at", alert_data["updated_at"]),
+                alert_data.get("last_notified_at", alert_data["updated_at"]),
             ),
         )
         conn.commit()
@@ -560,6 +594,10 @@ def log_monitoring_run(
     bias: Optional[float] = None,
     sample_count: Optional[int] = None,
     db_path: Optional[str] = None,
+    scenario: Optional[str] = None,
+    data_source: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Record a completed monitoring cycle and its top-level evaluation metrics."""
     path = db_path or get_db_path()
@@ -569,8 +607,9 @@ def log_monitoring_run(
             INSERT INTO monitoring_runs (
                 run_id, timestamp, model_version, drift_status, drift_share,
                 performance_status, mae, rmse, r2, bias, sample_count,
-                alerts_triggered, alerts_resolved, active_alerts_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                alerts_triggered, alerts_resolved, active_alerts_count,
+                scenario, data_source, batch_id, details_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 run_id,
@@ -587,6 +626,10 @@ def log_monitoring_run(
                 int(alerts_triggered),
                 int(alerts_resolved),
                 int(active_alerts_count),
+                scenario,
+                data_source,
+                batch_id,
+                json.dumps(details) if details is not None else None,
             ),
         )
         conn.commit()
@@ -643,6 +686,14 @@ def get_monitoring_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
         "latest_rmse": {},
         "active_alerts": {},
         "execution_failures": {},
+        "latest_r2": {},
+        "latest_bias": {},
+        "latest_sample_count": {},
+        "latest_dataset_drift": None,
+        "latest_drifted_features_count": None,
+        "latest_cycle_timestamp": None,
+        "latest_success_timestamp": None,
+        "latest_scenario": None,
     }
 
     with get_connection(path) as conn:
@@ -663,10 +714,15 @@ def get_monitoring_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
             stats["drift_failures_total"] = int(row[0]) if row else 0
 
             row = conn.execute(
-                "SELECT drift_share FROM monitoring_runs WHERE drift_share IS NOT NULL ORDER BY timestamp DESC LIMIT 1;"
+                "SELECT drift_share, details_json FROM monitoring_runs "
+                "WHERE drift_status != 'skipped' ORDER BY timestamp DESC, rowid DESC LIMIT 1;"
             ).fetchone()
             if row and row[0] is not None:
                 stats["latest_drift_share"] = float(row[0])
+                details = json.loads(row[1] or "{}")
+                drift = details.get("drift_result") or {}
+                stats["latest_dataset_drift"] = drift.get("dataset_drift_detected")
+                stats["latest_drifted_features_count"] = drift.get("drifted_features_count")
 
             row = conn.execute(
                 "SELECT COUNT(*) FROM monitoring_runs WHERE performance_status IN ('evaluated', 'failed');"
@@ -680,10 +736,12 @@ def get_monitoring_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
 
             rows = conn.execute(
                 """
-                SELECT model_version, mae, rmse, MAX(timestamp)
-                FROM monitoring_runs
-                WHERE mae IS NOT NULL AND rmse IS NOT NULL
-                GROUP BY model_version;
+                SELECT model_version, mae, rmse, r2, bias, sample_count
+                FROM (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY model_version ORDER BY timestamp DESC, rowid DESC
+                    ) AS recency FROM monitoring_runs
+                ) WHERE recency = 1;
                 """
             ).fetchall()
             for r in rows:
@@ -691,6 +749,22 @@ def get_monitoring_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
                 if r[1] is not None and r[2] is not None:
                     stats["latest_mae"][mv] = float(r[1])
                     stats["latest_rmse"][mv] = float(r[2])
+                for index, key in [(3, "latest_r2"), (4, "latest_bias"), (5, "latest_sample_count")]:
+                    if r[index] is not None:
+                        stats[key][mv] = float(r[index])
+
+            row = conn.execute(
+                "SELECT timestamp, scenario FROM monitoring_runs ORDER BY timestamp DESC, rowid DESC LIMIT 1"
+            ).fetchone()
+            if row:
+                stats["latest_cycle_timestamp"] = datetime.fromisoformat(row[0].replace("Z", "+00:00")).timestamp()
+                stats["latest_scenario"] = row[1]
+            row = conn.execute(
+                "SELECT timestamp FROM monitoring_runs WHERE drift_status = 'evaluated' "
+                "AND performance_status = 'evaluated' ORDER BY timestamp DESC, rowid DESC LIMIT 1"
+            ).fetchone()
+            if row:
+                stats["latest_success_timestamp"] = datetime.fromisoformat(row[0].replace("Z", "+00:00")).timestamp()
 
         if "alerts" in tables:
             rows = conn.execute(

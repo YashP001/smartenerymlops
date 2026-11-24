@@ -154,6 +154,7 @@ def fetch_paired_records(
     model_version: Optional[str] = None,
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
+    prediction_ids: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Retrieve joined prediction-feedback pairs from v_monitoring_records.
 
@@ -218,10 +219,20 @@ def fetch_paired_records(
         query += " AND datetime(prediction_timestamp) <= datetime(?)"
         params.append(norm_end)
 
+    # Exact batch membership avoids timestamp rounding and delayed-feedback races.
+    # A temporary table also avoids SQLite's host-parameter limit for large batches.
+    if prediction_ids is not None:
+        query += " AND prediction_id IN (SELECT prediction_id FROM selected_predictions)"
     query += " ORDER BY prediction_timestamp ASC;"
 
     try:
         with get_connection(path) as conn:
+            if prediction_ids is not None:
+                conn.execute("CREATE TEMP TABLE selected_predictions (prediction_id TEXT PRIMARY KEY)")
+                conn.executemany(
+                    "INSERT OR IGNORE INTO selected_predictions VALUES (?)",
+                    [(pid,) for pid in prediction_ids],
+                )
             cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
     except sqlite3.OperationalError as e:
@@ -371,6 +382,7 @@ def evaluate_model_performance(
     max_abs_bias: float = DEFAULT_MAX_ABS_BIAS,
     min_samples: int = DEFAULT_MIN_SAMPLES,
     include_time_breakdown: bool = True,
+    prediction_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Execute complete performance evaluation on feedback-paired prediction records.
 
@@ -395,6 +407,7 @@ def evaluate_model_performance(
         model_version=model_version,
         start_time=start_time,
         end_time=end_time,
+        prediction_ids=prediction_ids,
     )
 
     evaluation_time = datetime.now(timezone.utc).isoformat()

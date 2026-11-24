@@ -39,7 +39,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Share of drifted input features in the latest drift analysis (Warning >= 0.33, Critical >= 0.50).",
+      "description": "Latest share of drifted inputs. Dataset alert threshold is 50%; severity is critical at 75% or when marginal target drift accompanies dataset drift.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -58,11 +58,11 @@
               },
               {
                 "color": "#EAB839",
-                "value": 0.33
+                "value": 0.5
               },
               {
                 "color": "red",
-                "value": 0.5
+                "value": 0.75
               }
             ]
           },
@@ -101,7 +101,8 @@
           "expr": "energy_advisor_dataset_drift_share",
           "legendFormat": "Drift Share",
           "range": false,
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         }
       ],
       "title": "Data Drift Share",
@@ -174,7 +175,8 @@
           "expr": "energy_advisor_model_mae",
           "legendFormat": "{{model_version}} MAE",
           "range": false,
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         }
       ],
       "title": "Model MAE (kWh)",
@@ -247,7 +249,8 @@
           "expr": "energy_advisor_model_rmse",
           "legendFormat": "{{model_version}} RMSE",
           "range": false,
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         }
       ],
       "title": "Model RMSE (kWh)",
@@ -316,10 +319,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(energy_advisor_active_alerts) or vector(0)",
+          "expr": "energy_advisor_active_alerts_total",
           "legendFormat": "Active Alerts",
           "range": false,
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         }
       ],
       "title": "Total Active Alerts",
@@ -847,7 +851,8 @@
           "expr": "sum by (alert_type, severity) (energy_advisor_active_alerts)",
           "legendFormat": "{{alert_type}} [{{severity}}]",
           "range": false,
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         }
       ],
       "title": "Active Alerts by Type & Severity",
@@ -902,11 +907,176 @@
           "expr": "energy_advisor_monitoring_execution_failures_total",
           "legendFormat": "{{operation}} Failures",
           "range": false,
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         }
       ],
       "title": "Monitoring Execution Failures",
       "type": "stat"
+    },
+    {
+      "id": 103,
+      "type": "stat",
+      "title": "Latest Model R2",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 22
+      },
+      "targets": [
+        {
+          "expr": "energy_advisor_model_r2",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No evaluation yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 104,
+      "type": "stat",
+      "title": "Prediction Bias (kWh)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 22
+      },
+      "targets": [
+        {
+          "expr": "energy_advisor_model_bias_kwh",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No evaluation yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 105,
+      "type": "stat",
+      "title": "Drifted Input Features",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 22
+      },
+      "targets": [
+        {
+          "expr": "energy_advisor_drifted_features_count",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No evaluation yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 106,
+      "type": "stat",
+      "title": "Last Successful Monitoring Cycle",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 22
+      },
+      "targets": [
+        {
+          "expr": "energy_advisor_monitoring_last_success_timestamp_seconds * 1000",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsIso",
+          "noValue": "No evaluation yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
     }
   ],
   "refresh": "15s",
@@ -937,6 +1107,6 @@
   "timezone": "browser",
   "title": "Smart Home Energy Advisor - MLOps Observability",
   "uid": "smart-home-energy-advisor",
-  "version": 1,
+  "version": 3,
   "weekStart": ""
 }

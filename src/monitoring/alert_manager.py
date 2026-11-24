@@ -83,12 +83,15 @@ class Alert:
     resolved_at: Optional[str] = None
     trigger_count: int = 1
     last_triggered_at: Optional[str] = None
+    last_notified_at: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert alert to serializable dictionary."""
         d = asdict(self)
         if self.last_triggered_at is None:
             d["last_triggered_at"] = self.updated_at
+        if self.last_notified_at is None:
+            d["last_notified_at"] = self.updated_at
         return d
 
 
@@ -242,7 +245,7 @@ class AlertManager:
 
             if existing_alert:
                 # Deduplication and cooldown check
-                last_trig = existing_alert.get("last_triggered_at") or existing_alert["updated_at"]
+                last_trig = existing_alert.get("last_notified_at") or existing_alert.get("last_triggered_at") or existing_alert["updated_at"]
                 elapsed = self._calculate_elapsed_seconds(last_trig, now_iso)
 
                 trigger_count = int(existing_alert.get("trigger_count", 1)) + 1
@@ -260,6 +263,7 @@ class AlertManager:
                     resolved_at=None,
                     trigger_count=trigger_count,
                     last_triggered_at=now_iso,
+                    last_notified_at=last_trig if elapsed < cooldown else now_iso,
                 )
                 save_alert(updated_alert.to_dict(), db_path=self.db_path)
 
@@ -435,7 +439,7 @@ class AlertManager:
 
             if existing_alert:
                 # Deduplication and cooldown
-                last_trig = existing_alert.get("last_triggered_at") or existing_alert["updated_at"]
+                last_trig = existing_alert.get("last_notified_at") or existing_alert.get("last_triggered_at") or existing_alert["updated_at"]
                 elapsed = self._calculate_elapsed_seconds(last_trig, now_iso)
 
                 trigger_count = int(existing_alert.get("trigger_count", 1)) + 1
@@ -453,6 +457,7 @@ class AlertManager:
                     resolved_at=None,
                     trigger_count=trigger_count,
                     last_triggered_at=now_iso,
+                    last_notified_at=last_trig if elapsed < cooldown else now_iso,
                 )
                 save_alert(updated_alert.to_dict(), db_path=self.db_path)
 
@@ -595,7 +600,7 @@ class AlertManager:
         )
 
         if existing:
-            last_trig = existing.get("last_triggered_at") or existing["updated_at"]
+            last_trig = existing.get("last_notified_at") or existing.get("last_triggered_at") or existing["updated_at"]
             elapsed = self._calculate_elapsed_seconds(last_trig, now_iso)
             trigger_count = int(existing.get("trigger_count", 1)) + 1
 
@@ -613,6 +618,7 @@ class AlertManager:
                 resolved_at=None,
                 trigger_count=trigger_count,
                 last_triggered_at=now_iso,
+                last_notified_at=last_trig if elapsed < cooldown else now_iso,
             )
             save_alert(updated_alert.to_dict(), db_path=self.db_path)
 

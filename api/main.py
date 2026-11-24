@@ -35,6 +35,7 @@ from src.monitoring.database import (
     PredictionNotFoundError,
     DuplicateFeedbackError,
     InvalidFeedbackValueError,
+    get_store_id,
 )
 from src.monitoring.metrics import default_metrics
 
@@ -68,7 +69,7 @@ def get_active_model():
         app.state.model = model
         return model
     try:
-        loaded = load_model()
+        loaded = load_model(model_path=os.getenv("ENERGY_MODEL_PATH"))
         app.state.model = loaded
         model = loaded
         return loaded
@@ -89,7 +90,7 @@ async def lifespan(app: FastAPI):
         print(f"Monitoring DB initialization notice: {e}")
 
     try:
-        loaded = load_model()
+        loaded = load_model(model_path=os.getenv("ENERGY_MODEL_PATH"))
         app.state.model = loaded
         model = loaded
         print("Model loaded successfully into application state.")
@@ -512,9 +513,17 @@ def readiness_check():
 def metrics_endpoint():
     """Expose Prometheus metrics for operational observability scraping."""
     payload = default_metrics.generate_payload()
+    headers = {}
+    try:
+        store_id = get_store_id()
+        if store_id:
+            headers["X-Monitoring-Store-ID"] = store_id
+    except Exception:
+        pass  # Preserve metrics availability when the monitoring store is unavailable.
     return Response(
         content=payload,
         media_type="text/plain; version=0.0.4; charset=utf-8",
+        headers=headers,
     )
 
 

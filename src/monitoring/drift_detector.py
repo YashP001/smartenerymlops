@@ -264,7 +264,8 @@ def calculate_dataset_drift(
 ) -> Dict[str, Any]:
     """Calculate dataset-level and feature-level drift summary.
 
-    Distinguishes input feature drift (covariate shift) from target column drift (concept shift).
+    Distinguishes input feature drift from marginal target drift. Neither alone
+    establishes a change in the conditional relationship P(target | inputs).
 
     Args:
         reference_data: Reference DataFrame or path.
@@ -310,7 +311,7 @@ def calculate_dataset_drift(
     drift_share = float(drifted_count / total_features) if total_features > 0 else 0.0
     dataset_drift_detected = drift_share >= dataset_drift_share_threshold
 
-    # 2. Evaluate target column drift (concept shift) separately if present
+    # 2. Evaluate marginal target drift separately; this is not proof of concept drift.
     target_drift_info: Optional[Dict[str, Any]] = None
     if target_column and target_column in ref_df.columns and target_column in prod_df.columns:
         t_res = calculate_feature_drift(

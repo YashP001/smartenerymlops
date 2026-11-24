@@ -1,6 +1,6 @@
 # AI-Assisted Smart Home Energy Advisor — End-to-End MLOps Integration
 
-[![CI Tests](https://img.shields.io/badge/tests-271%20passed-success)](tests/)
+[![Tests](https://img.shields.io/badge/tests-323%20total-blue)](tests/)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-1.0.0-009688.svg)](https://fastapi.tiangolo.com/)
 [![MLflow](https://img.shields.io/badge/MLflow-Tracking%20%26%20Registry-0194E2.svg)](https://mlflow.org/)
@@ -19,7 +19,7 @@ Accurate hour-ahead electricity forecasting enables residential consumers to opt
 The predictive model is trained on the empirical **CEEW (Council on Energy, Environment and Water) Mathura Smart Meter Dataset** (2021), comprising 550,560 raw multi-minute readings across 35 residential households. Cleaned into strict hourly intervals, the model uses six historical and calendar features to forecast next-hour energy consumption (`target_next_hour` in kWh).
 
 ### Operational Highlights
-- **Winning Model Architecture:** Gradient Boosting Regressor (`n_estimators=100`, `max_depth=5`, `learning_rate=0.1`, `random_state=42`) using six canonical telemetry and calendar features.
+- **Winning Model Architecture:** Gradient Boosting Regressor (`n_estimators=100`, `max_depth=3`, `learning_rate=0.1`, `random_state=42`) using six canonical telemetry and calendar features.
 - **Phase 1 Historical Baseline Checkpoint:**
   - Trained on merged `train + validation` splits ($N=22,781$ rows).
   - Evaluated on all $N=4,120$ held-out chronological test rows (`data/test.csv`).
@@ -91,10 +91,10 @@ flowchart TD
 | **Experiment Tracking** | MLflow, Weights & Biases (W&B) | Hyperparameter logging, model signatures, metrics tracking, and Model Registry. |
 | **Inference API** | FastAPI, Uvicorn, Pydantic v2 | High-performance asynchronous REST API with strict input/output validation. |
 | **Persistence** | SQLite3, PRAGMA foreign keys, SQL Views | Decoupled prediction logging, feedback storage, alert state tracking, and run history. |
-| **Drift Monitoring** | Evidently AI, SciPy (KS-test, Cohen's $d$) | Feature-level distribution shift, target concept drift, and interactive visual reports. |
+| **Drift Monitoring** | Evidently AI, SciPy (KS-test, Cohen's $d$) | Feature-level distribution shift, marginal target drift, and interactive visual reports. |
 | **Observability** | Prometheus (`prometheus_client`), Grafana | Real-time metric scraping, time-series storage, and operational dashboard visualization. |
 | **Containerization** | Docker, Docker Compose | Multi-container microservice orchestration (`api`, `prometheus`, `grafana`). |
-| **Testing & CI** | Pytest (271 tests), Starlette TestClient | Unit testing, statistical assertions, alert lifecycle validation, and end-to-end integration. |
+| **Testing & CI** | Pytest (323 tests), Starlette TestClient | Unit testing, statistical assertions, alert lifecycle validation, and end-to-end integration. |
 
 ---
 
@@ -114,6 +114,11 @@ The model consumes six features to forecast the next hour's electricity consumpt
 ---
 
 ## 5. Quickstart: Reproducible End-to-End Demonstration
+
+For the Phase 3 live **normal → drift → degradation → recovery** workflow with fresh batches,
+manual scenario switching, and a shared API/Grafana database, see the
+[Continuous Monitoring Demo Guide](docs/continuous_monitoring_demo_guide.md).
+The existing one-shot demonstration below remains supported.
 
 The platform includes a self-contained demonstration script (`scripts/run_end_to_end_demo.py`) that executes the complete 10-stage operational lifecycle.
 
@@ -200,7 +205,7 @@ For complete metrics definitions and PromQL queries, see the [Observability Guid
 
 ## 8. Automated Testing
 
-The repository contains a test suite of **271 automated tests** covering data validation, feature engineering, model training, MLflow tracking, database persistence, drift detection, performance monitoring, alert lifecycle management, Prometheus exposition, and end-to-end integration.
+The repository contains a test suite of **323 automated tests** covering data validation, feature engineering, model training, MLflow tracking, database persistence, drift detection, performance monitoring, alert lifecycle management, Prometheus exposition, and end-to-end integration.
 
 Run the full test suite:
 
@@ -234,4 +239,4 @@ Run the full test suite:
 3. **Statistical Sample Requirement:**
    - Model performance degradation monitoring strictly enforces a minimum of 30 feedback records (`min_samples = 30`) before evaluating performance alerts. Running evaluations on fewer records returns `insufficient_data` to prevent statistical noise from triggering false alarms.
 4. **Data Provenance:**
-   - Historical baseline data originates from 50 households in Mathura, India (2021). Operational production data and demonstration feedback are synthetically generated and explicitly labeled as demonstration artifacts.
+   - Historical baseline data originates from 50 households in Mathura, India (2021). Production drift scenarios are simulated. Healthy demonstration feedback replays genuine held-out targets; controlled degradation feedback is simulated and explicitly labelled.
