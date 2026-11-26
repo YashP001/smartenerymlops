@@ -48,12 +48,13 @@ from scripts.log_demonstration_artifacts import (
     log_demonstration_artifacts,
     log_all_demonstration_artifacts,
 )
+from src.mlflow_config import PROJECT_ROOT as TRACKING_PROJECT_ROOT
 
 # ---------------------------------------------------------------------------
 # Dynamic Local Demonstration Detection
 # ---------------------------------------------------------------------------
 ENV_TRACKING_URI = os.getenv("LOCAL_MLFLOW_TRACKING_URI")
-LOCAL_DB_CANDIDATE = pathlib.Path("E:/mlops%20phase%202/smart-home-energy-advisor/mlflow.db")
+LOCAL_DB_CANDIDATE = TRACKING_PROJECT_ROOT / "mlflow.db"
 
 if ENV_TRACKING_URI:
     LOCAL_TRACKING_URI = ENV_TRACKING_URI

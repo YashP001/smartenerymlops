@@ -107,7 +107,8 @@ class TestPredictionAndFeedbackLifecycle:
             assert row["prediction_id"] == pred_id
             assert abs(row["energy_current_hour"] - 0.052) < 1e-4
             assert abs(row["predicted_energy_kwh"] - data["predicted_energy_kwh"]) < 1e-4
-            assert row["model_version"] == "GradientBoostingRegressor"
+            assert row["model_version"] == data["model_version"]
+            assert row["model_run_id"] == data["model_run_id"]
 
     def test_feedback_submission_and_record_pairing(self, client, isolated_db, sample_feature_payload):
         """Feedback submitted attaches to the prediction and pairs in v_monitoring_records view."""

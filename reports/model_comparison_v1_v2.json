@@ -1,0 +1,42 @@
+{
+  "model_name": "smart-home-energy-advisor",
+  "tracking_store": "environment-configured MLFLOW_TRACKING_URI (value redacted)",
+  "training_rows": 18696,
+  "evaluation_rows": 4120,
+  "lineage": {
+    "code_revision": "42dc21fc38f710349a4a950388434565537c470d",
+    "code_worktree_dirty": "true",
+    "training_code_sha256": "18d2b810d26108395ccba27384cf5af053e7e30da786c3114a9eeaddf530ac0d",
+    "training_dataset": "data/train.csv",
+    "training_dataset_sha256": "5ada97c4a287a235279522af2968e16706756f27bf915387a793534d7fbe73b2",
+    "evaluation_dataset": "data/test.csv (one-time final holdout comparison)",
+    "evaluation_dataset_sha256": "883121b6c8b78e49f0e01085f9bdae16dad86124efb9bfc2842b9b491d80a5b2",
+    "evaluation_protocol": "Same held-out test.csv for both models; no tuning on this set"
+  },
+  "versions": {
+    "v1": {
+      "version": "1",
+      "run_id": "93b515d19d2a49aebd7edacac361d14a",
+      "training_dataset_sha256": "5ada97c4a287a235279522af2968e16706756f27bf915387a793534d7fbe73b2",
+      "MAE": 0.07379675504114651,
+      "RMSE": 0.15103572896543785,
+      "R2": 0.37364915648574193
+    },
+    "v2": {
+      "version": "2",
+      "run_id": "395050cc42294a408e3102c47a6d25de",
+      "MAE": 0.0755469921987444,
+      "RMSE": 0.15252033837895776,
+      "R2": 0.36127517669610465,
+      "code_revision": "42dc21fc38f710349a4a950388434565537c470d",
+      "training_code_sha256": "230843d43ae537828a5ee44395532c4fdf2774c6db33d6868da1cb1867ed7a00",
+      "training_dataset_sha256": "5ada97c4a287a235279522af2968e16706756f27bf915387a793534d7fbe73b2"
+    }
+  },
+  "v2_minus_v1": {
+    "MAE": 0.0017502371575978948,
+    "RMSE": 0.0014846094135199106,
+    "R2": -0.01237397978963728
+  },
+  "decision": "Review the shared-holdout metrics; promotion is an explicit operator action."
+}

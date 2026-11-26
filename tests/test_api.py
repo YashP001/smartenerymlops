@@ -100,7 +100,8 @@ class TestReadinessEndpoint:
         data = response.json()
         assert data["status"] == "ready"
         assert data["model_loaded"] is True
-        assert data["model_version"] == "GradientBoostingRegressor"
+        assert data["model_version"]
+        assert data["model_run_id"] is None or len(data["model_run_id"]) == 32
         assert isinstance(data["database_initialized"], bool)
 
     def test_ready_returns_503_when_model_unavailable(self, monkeypatch):

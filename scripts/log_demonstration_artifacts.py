@@ -76,10 +76,11 @@ if str(PROJECT_ROOT) not in sys.path:
 os.environ["MLFLOW_DISABLE_AGENT_HINT"] = "1"
 import mlflow
 from mlflow.tracking import MlflowClient
+from src.mlflow_config import configure_mlflow, default_tracking_uri
 
 DEFAULT_TRACKING_URI = os.getenv(
     "MLFLOW_TRACKING_URI",
-    "sqlite:///E:/mlops%20phase%202/smart-home-energy-advisor/mlflow.db",
+    default_tracking_uri(),
 )
 DEFAULT_RUN_ID = os.getenv("MLFLOW_RUN_ID", "e9922ecbb3af4c029aebf2f19b755694")
 DEFAULT_MODEL_NAME = "smart-home-energy-advisor"
@@ -884,7 +885,7 @@ def build_training_logs_artifacts(
             "RMSE": 0.1423299354590836,
             "R2": 0.3396654155844716
         },
-        "artifact_location": info.artifact_uri if info else "file:E:/mlops phase 2/smart-home-energy-advisor/mlruns/1/e9922ecbb3af4c029aebf2f19b755694/artifacts"
+        "artifact_location": info.artifact_uri if info else "not_available"
     }
     summary_path = target_dir / "training_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -1314,7 +1315,7 @@ log_demonstration_artifacts = log_all_demonstration_artifacts
 
 def main() -> None:
     """CLI entrypoint for enhancing demonstration artifacts."""
-    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", DEFAULT_TRACKING_URI)
+    tracking_uri = configure_mlflow()
     run_id = os.getenv("MLFLOW_RUN_ID", DEFAULT_RUN_ID)
 
     print(f"Tracking URI: {tracking_uri}")

@@ -17,6 +17,7 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.features import FEATURE_COLUMNS, TARGET_COLUMN
+from src.mlflow_config import SKOPS_TRUSTED_TYPES
 from src.experiment_tracking import evaluate, get_models, track_experiments
 from src.model_registry import get_best_run, register_best_model, load_registered_model
 
@@ -83,6 +84,7 @@ def _log_dummy_model_run(exp_id: str, run_name: str, model_type: str, mae: float
                 artifact_path="model",
                 signature=sig,
                 serialization_format="cloudpickle",
+                skops_trusted_types=SKOPS_TRUSTED_TYPES,
             )
         return run.info.run_id
 

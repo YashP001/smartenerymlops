@@ -12,6 +12,7 @@ __pycache__/
 # MLflow local experiment artifacts
 mlruns/
 mlflow.db
+models/deployment.json
 
 # Weights & Biases
 wandb/

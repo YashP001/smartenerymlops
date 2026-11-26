@@ -27,6 +27,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from src.predict import load_model, predict
+from src.model_registry import get_deployed_version
 from src.features import FEATURE_COLUMNS
 from src.monitoring.database import (
     init_db,
@@ -59,17 +60,38 @@ def safe_log_prediction(*args, **kwargs):
 model = None
 
 
+def model_identity(active_model):
+    """Return immutable registry identity, or explicit local-checkpoint identity."""
+    return {
+        "model_name": getattr(active_model, "_mlflow_model_name", None),
+        "model_version": str(getattr(active_model, "_mlflow_model_version", "local")),
+        "model_run_id": getattr(active_model, "_mlflow_run_id", None),
+    }
+
+
+def model_loaded_for_version(active_model, version: str) -> bool:
+    loaded_version = getattr(
+        active_model, "_requested_model_version", model_identity(active_model)["model_version"]
+    )
+    return str(loaded_version) == str(version)
+
+
 def get_active_model():
     """Retrieve the model from application state, loading once if uninitialized."""
     global model
+    desired_version = get_deployed_version()
     active = getattr(app.state, "model", None)
-    if active is not None:
+    if active is not None and model_loaded_for_version(active, desired_version):
         return active
-    if model is not None:
+    if active is not None and os.getenv("ENERGY_MODEL_PATH"):
+        return active
+    if model is not None and model_loaded_for_version(model, desired_version):
         app.state.model = model
         return model
     try:
-        loaded = load_model(model_path=os.getenv("ENERGY_MODEL_PATH"))
+        loaded = load_model(
+            model_path=os.getenv("ENERGY_MODEL_PATH"), version=desired_version
+        )
         app.state.model = loaded
         model = loaded
         return loaded
@@ -90,7 +112,9 @@ async def lifespan(app: FastAPI):
         print(f"Monitoring DB initialization notice: {e}")
 
     try:
-        loaded = load_model(model_path=os.getenv("ENERGY_MODEL_PATH"))
+        loaded = load_model(
+            model_path=os.getenv("ENERGY_MODEL_PATH"), version=get_deployed_version()
+        )
         app.state.model = loaded
         model = loaded
         print("Model loaded successfully into application state.")
@@ -110,8 +134,8 @@ app = FastAPI(
     title="Smart Home Energy Advisor",
     description=(
         "Predict next-hour electricity consumption from smart meter "
-        "readings using a Gradient Boosting Regressor trained on "
-        "CEEW Mathura 2021 data."
+        "readings using the explicitly deployed, versioned model trained "
+        "on CEEW Mathura 2021 data."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -201,6 +225,10 @@ class PredictionOutput(BaseModel):
         default="GradientBoostingRegressor",
         description="Model used for prediction",
     )
+    model_version: str = Field(..., description="Immutable registered model version or 'local'")
+    model_run_id: Optional[str] = Field(
+        None, description="MLflow run that produced this registered model artifact"
+    )
     features_used: list = Field(
         default_factory=lambda: FEATURE_COLUMNS.copy(),
         description="Feature columns used by the model",
@@ -264,6 +292,7 @@ class ReadinessResponse(BaseModel):
     status: str = Field(..., description="Service readiness status")
     model_loaded: bool = Field(..., description="Whether the model is ready for predictions")
     model_version: Optional[str] = Field(None, description="Active model version name")
+    model_run_id: Optional[str] = Field(None, description="MLflow run for the active model")
     database_initialized: bool = Field(..., description="Whether SQLite monitoring store is initialized")
 
 
@@ -446,7 +475,7 @@ def root_homepage():
 
     <div class="footer">
       <span>AI-Assisted Smart Home Energy Advisor (v1.0.0)</span>
-      <span>Model: GradientBoostingRegressor</span>
+      <span>Model: Explicitly versioned MLflow deployment</span>
     </div>
   </div>
 </body>
@@ -488,23 +517,25 @@ def readiness_check():
         )
 
     if not db_initialized:
-        model_name = getattr(active_model, "__class__", type(active_model)).__name__
+        identity = model_identity(active_model)
         raise HTTPException(
             status_code=503,
             detail={
                 "status": "not_ready",
                 "model_loaded": True,
-                "model_version": model_name,
+                "model_version": identity["model_version"],
+                "model_run_id": identity["model_run_id"],
                 "database_initialized": False,
                 "message": "Monitoring database is unavailable. Predictions and feedback cannot be persisted.",
             },
         )
 
-    model_name = getattr(active_model, "__class__", type(active_model)).__name__
+    identity = model_identity(active_model)
     return ReadinessResponse(
         status="ready",
         model_loaded=True,
-        model_version=model_name,
+        model_version=identity["model_version"],
+        model_run_id=identity["model_run_id"],
         database_initialized=True,
     )
 
@@ -535,8 +566,7 @@ def make_prediction(
 ):
     """Predict next-hour energy consumption.
 
-    Accepts the six input features used by the trained Gradient
-    Boosting Regressor, returns the predicted energy value, and asynchronously
+    Accepts the six canonical model features, returns the predicted energy value, and asynchronously
     records the prediction for performance and drift monitoring.
     """
     active_model = get_active_model()
@@ -555,14 +585,14 @@ def make_prediction(
         input_dict = input_data.model_dump()
         prediction = predict(active_model, input_dict)
     except ValueError as e:
-        model_name = getattr(active_model, "__class__", type(active_model)).__name__
+        model_name = model_identity(active_model)["model_version"]
         default_metrics.record_prediction(
             model_version=model_name,
             status="error",
         )
         raise HTTPException(status_code=422, detail=str(e))
     except Exception:
-        model_name = getattr(active_model, "__class__", type(active_model)).__name__
+        model_name = model_identity(active_model)["model_version"]
         default_metrics.record_prediction(
             model_version=model_name,
             status="error",
@@ -572,10 +602,11 @@ def make_prediction(
     latency_s = time.perf_counter() - start_time
     latency_ms = round(latency_s * 1000, 2)
     prediction_id = str(uuid.uuid4())
-    model_name = getattr(active_model, "__class__", type(active_model)).__name__
+    estimator_name = getattr(active_model, "__class__", type(active_model)).__name__
+    identity = model_identity(active_model)
 
     default_metrics.record_prediction(
-        model_version=model_name,
+        model_version=identity["model_version"],
         status="success",
         latency_seconds=latency_s,
         predicted_energy=prediction,
@@ -587,7 +618,8 @@ def make_prediction(
         prediction_id=prediction_id,
         features=input_dict,
         predicted_energy_kwh=prediction,
-        model_version=model_name,
+        model_version=identity["model_version"],
+        model_run_id=identity["model_run_id"],
         latency_ms=latency_ms,
     )
 
@@ -595,7 +627,9 @@ def make_prediction(
 
     return PredictionOutput(
         predicted_energy_kwh=prediction,
-        model=model_name,
+        model=estimator_name,
+        model_version=identity["model_version"],
+        model_run_id=identity["model_run_id"],
         prediction_id=prediction_id,
     )
 

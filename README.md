@@ -120,6 +120,59 @@ manual scenario switching, and a shared API/Grafana database, see the
 [Continuous Monitoring Demo Guide](docs/continuous_monitoring_demo_guide.md).
 The existing one-shot demonstration below remains supported.
 
+For the Person 2 **model lifecycle** demonstration (portable MLflow tracking,
+v1/v2 comparison, explicit selection, promotion, prediction lineage, and rollback),
+see the [Model Lifecycle Guide](docs/model_lifecycle_guide.md).
+
+### 5.0.1 Model Version Lifecycle (Person 2)
+
+Train/register the documented v1 baseline and Random Forest v2 candidate, then
+compare both once on the same held-out `data/test.csv` (the test set is not used
+for tuning):
+
+```powershell
+python scripts/train_and_compare_model_versions.py
+python -m src.model_registry status
+```
+
+The reproducible comparison in `reports/model_comparison_v1_v2.md` reports:
+
+| Version | Registry version | MLflow run ID | Test MAE | Test RMSE | Test R² |
+|---|---:|---|---:|---:|---:|
+| v1 Gradient Boosting | 1 | `93b515d19d2a49aebd7edacac361d14a` | 0.073797 | 0.151036 | 0.373649 |
+| v2 Random Forest | 2 | `395050cc42294a408e3102c47a6d25de` | 0.075547 | 0.152520 | 0.361275 |
+
+The evidence favors v1, so v2 remains a candidate and is not promoted
+automatically. To demonstrate selection, promotion, and rollback:
+
+```powershell
+python -m src.model_registry select --version 2
+python -m src.model_registry promote
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8020
+```
+
+In a second terminal, inspect the active identity and request a prediction:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8020/ready" | Format-List
+$body = @{
+  energy_current_hour = 0.05
+  energy_previous_hour = 0.04
+  energy_two_hours_ago = 0.06
+  target_hour = 14
+  target_day_of_week = 2
+  target_is_weekend = 0
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8020/predict" -Method Post -ContentType "application/json" -Body $body | Format-List
+python -m src.model_registry rollback
+Invoke-RestMethod "http://127.0.0.1:8020/ready" | Format-List
+```
+
+`/ready`, `/predict`, the SQLite `predictions` table, and
+`v_monitoring_records` expose the registry `model_version` and MLflow
+`model_run_id` for each registered-model prediction. The guide documents the
+tracking URI, MLflow UI, API request, and deployment steps in full.
+
 The platform includes a self-contained demonstration script (`scripts/run_end_to_end_demo.py`) that executes the complete 10-stage operational lifecycle.
 
 ### 5.1 One-Command Automated Run

@@ -191,6 +191,7 @@ class TestMetricsEndpoint:
 
     def test_unexpected_inference_exception_increments_error_counter(self, test_client):
         """Unexpected inference exceptions increment prediction error counter and preserve HTTP 500 error."""
+        model_version = test_client.get("/ready").json()["model_version"]
         payload = {
             "energy_current_hour": 0.05,
             "energy_previous_hour": 0.04,
@@ -204,7 +205,7 @@ class TestMetricsEndpoint:
                 test_client.post("/predict", json=payload)
 
         metrics_resp = test_client.get("/metrics")
-        assert 'energy_advisor_prediction_requests_total{model_version="GradientBoostingRegressor",status="error"}' in metrics_resp.text
+        assert f'energy_advisor_prediction_requests_total{{model_version="{model_version}",status="error"}}' in metrics_resp.text
 
 
 # ─── 2. Metric Container & Collector Unit Tests ───────────────────────

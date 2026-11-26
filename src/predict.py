@@ -92,8 +92,12 @@ def load_model(
             )
         model = joblib.load(path)
         print(f"Loaded model from local fallback: '{path}'")
+        model._mlflow_model_name = None
+        model._mlflow_model_version = "local"
+        model._mlflow_run_id = None
 
     verify_model_features(model)
+    model._requested_model_version = str(version) if version else None
     return model
 
 

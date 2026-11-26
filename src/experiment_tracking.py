@@ -34,6 +34,7 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
 from src.features import FEATURE_COLUMNS, TARGET_COLUMN
+from src.mlflow_config import configure_mlflow
 
 
 def evaluate(y_true, predictions):
@@ -107,6 +108,7 @@ def track_experiments(
             print(f"Warning: W&B initialization failed ({e}). Skipping W&B logging.")
             use_wandb = False
 
+    configure_mlflow()
     mlflow.set_experiment(experiment_name)
 
     results = []

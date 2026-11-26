@@ -52,7 +52,8 @@ Stores raw feature inputs and model inference outputs:
 | `target_day_of_week` | `INTEGER NOT NULL` | Day of week (0=Mon, 6=Sun) |
 | `target_is_weekend` | `INTEGER NOT NULL` | Weekend binary flag (0 or 1) |
 | `predicted_energy_kwh` | `REAL NOT NULL` | Model prediction (kWh) |
-| `model_version` | `TEXT NOT NULL` | Model name/version (e.g. `GradientBoostingRegressor`) |
+| `model_version` | `TEXT NOT NULL` | Immutable MLflow registry version (for example `1` or `2`); local fallback is explicitly labeled `local` |
+| `model_run_id` | `TEXT` | MLflow training run that produced the registered artifact; null only for local fallback or historical rows |
 | `latency_ms` | `REAL` | Execution latency in milliseconds |
 
 ### Table: `feedback`
@@ -68,6 +69,7 @@ Stores verified actual meter readings:
 Joined view providing instant actual-versus-predicted error analysis:
 - `error = actual_energy_kwh - predicted_energy_kwh`
 - `absolute_error = ABS(actual_energy_kwh - predicted_energy_kwh)`
+- `model_version` and `model_run_id` preserve the model artifact identity for each feedback pair.
 
 ---
 

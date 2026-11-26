@@ -1,7 +1,13 @@
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import mlflow
 import mlflow.sklearn
 from mlflow.models import infer_signature
 import pandas as pd
+from src.mlflow_config import SKOPS_TRUSTED_TYPES, configure_mlflow
 
 from sklearn.base import clone
 from sklearn.linear_model import LinearRegression
@@ -38,6 +44,7 @@ def evaluate(y_true, predictions):
 
 
 def main():
+    configure_mlflow()
     train = pd.read_csv(TRAIN_PATH)
     validation = pd.read_csv(VALIDATION_PATH)
 
@@ -113,6 +120,7 @@ def main():
                 fitted,
                 artifact_path="model",
                 input_example=input_example,
+                skops_trusted_types=SKOPS_TRUSTED_TYPES,
                 signature=signature,
                 serialization_format="cloudpickle",
             )

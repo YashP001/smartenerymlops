@@ -85,6 +85,7 @@ def init_db(db_path: Optional[str] = None) -> None:
             target_is_weekend INTEGER NOT NULL,
             predicted_energy_kwh REAL NOT NULL,
             model_version TEXT NOT NULL,
+            model_run_id TEXT,
             latency_ms REAL
         );
 
@@ -97,34 +98,6 @@ def init_db(db_path: Optional[str] = None) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_predictions_timestamp ON predictions(timestamp);
         CREATE INDEX IF NOT EXISTS idx_feedback_timestamp ON feedback(feedback_timestamp);
-
-        CREATE VIEW IF NOT EXISTS v_monitoring_records AS
-        SELECT 
-            p.prediction_id,
-            p.timestamp AS prediction_timestamp,
-            p.energy_current_hour,
-            p.energy_previous_hour,
-            p.energy_two_hours_ago,
-            p.target_hour,
-            p.target_day_of_week,
-            p.target_is_weekend,
-            p.predicted_energy_kwh,
-            p.model_version,
-            p.latency_ms,
-            f.actual_energy_kwh,
-            f.feedback_timestamp,
-            CASE 
-                WHEN f.actual_energy_kwh IS NOT NULL 
-                THEN (f.actual_energy_kwh - p.predicted_energy_kwh) 
-                ELSE NULL 
-            END AS error,
-            CASE 
-                WHEN f.actual_energy_kwh IS NOT NULL 
-                THEN ABS(f.actual_energy_kwh - p.predicted_energy_kwh) 
-                ELSE NULL 
-            END AS absolute_error
-        FROM predictions p
-        LEFT JOIN feedback f ON p.prediction_id = f.prediction_id;
 
         CREATE TABLE IF NOT EXISTS alerts (
             alert_id TEXT PRIMARY KEY,
@@ -190,6 +163,26 @@ def init_db(db_path: Optional[str] = None) -> None:
         alert_columns = {row[1] for row in conn.execute("PRAGMA table_info(alerts)")}
         if "last_notified_at" not in alert_columns:
             conn.execute("ALTER TABLE alerts ADD COLUMN last_notified_at TEXT")
+        prediction_columns = {row[1] for row in conn.execute("PRAGMA table_info(predictions)")}
+        if "model_run_id" not in prediction_columns:
+            conn.execute("ALTER TABLE predictions ADD COLUMN model_run_id TEXT")
+        # Recreate the view so existing databases expose the new lineage column.
+        conn.execute("DROP VIEW IF EXISTS v_monitoring_records")
+        conn.execute("""
+            CREATE VIEW v_monitoring_records AS
+            SELECT p.prediction_id, p.timestamp AS prediction_timestamp,
+                p.energy_current_hour, p.energy_previous_hour,
+                p.energy_two_hours_ago, p.target_hour, p.target_day_of_week,
+                p.target_is_weekend, p.predicted_energy_kwh, p.model_version,
+                p.model_run_id, p.latency_ms, f.actual_energy_kwh,
+                f.feedback_timestamp,
+                CASE WHEN f.actual_energy_kwh IS NOT NULL
+                    THEN f.actual_energy_kwh - p.predicted_energy_kwh END AS error,
+                CASE WHEN f.actual_energy_kwh IS NOT NULL
+                    THEN ABS(f.actual_energy_kwh - p.predicted_energy_kwh) END AS absolute_error
+            FROM predictions p LEFT JOIN feedback f
+                ON p.prediction_id = f.prediction_id
+        """)
         conn.execute(
             "INSERT OR IGNORE INTO monitoring_metadata(key, value) VALUES ('store_id', ?)",
             (uuid.uuid4().hex,),
@@ -209,6 +202,7 @@ def log_prediction(
     features: Dict[str, Any],
     predicted_energy_kwh: float,
     model_version: str = "GradientBoostingRegressor",
+    model_run_id: Optional[str] = None,
     latency_ms: Optional[float] = None,
     timestamp: Optional[str] = None,
     db_path: Optional[str] = None,
@@ -232,8 +226,9 @@ def log_prediction(
                     target_is_weekend,
                     predicted_energy_kwh,
                     model_version,
+                    model_run_id,
                     latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     prediction_id,
@@ -246,6 +241,7 @@ def log_prediction(
                     int(features["target_is_weekend"]),
                     float(predicted_energy_kwh),
                     str(model_version),
+                    str(model_run_id) if model_run_id else None,
                     float(latency_ms) if latency_ms is not None else None,
                 ),
             )
