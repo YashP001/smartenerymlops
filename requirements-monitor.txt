@@ -1,0 +1,6 @@
+# Runtime dependencies for the continuous-monitoring worker and the one-shot
+# registry bootstrap (the "tools" image). The API image uses
+# requirements-inference.txt only and stays small.
+-r requirements-inference.txt
+scipy==1.18.0
+evidently==0.7.23

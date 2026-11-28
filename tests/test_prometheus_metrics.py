@@ -531,12 +531,13 @@ class TestConfigurationIntegrity:
         assert "prometheus" in services
         assert "grafana" in services
 
-        # Check API port and volume
-        assert "8000:8000" in services["api"]["ports"]
-        assert any("./data/monitoring" in v for v in services["api"]["volumes"])
+        # Host ports default to the documented values but can be remapped via
+        # .env (API_PORT / PROMETHEUS_PORT / GRAFANA_PORT); container ports are fixed.
+        assert "${API_PORT:-8000}:8000" in services["api"]["ports"]
+        # Monitoring data lives in a named volume shared with the monitor worker
+        # (not a host bind mount, which is slow for SQLite on Windows).
+        assert any(v.startswith("monitoring_store:") for v in services["api"]["volumes"])
+        assert "monitor" in services
 
-        # Check Prometheus port and volume
-        assert "9090:9090" in services["prometheus"]["ports"]
-
-        # Check Grafana port and volume
-        assert "3000:3000" in services["grafana"]["ports"]
+        assert "${PROMETHEUS_PORT:-9090}:9090" in services["prometheus"]["ports"]
+        assert "${GRAFANA_PORT:-3000}:3000" in services["grafana"]["ports"]

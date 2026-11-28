@@ -288,6 +288,12 @@ def _create_mock_regressor(pred_val: float = 0.08):
     mock.feature_names_in_ = FEATURE_COLUMNS
     mock.n_features_in_ = len(FEATURE_COLUMNS)
     mock.predict.return_value = np.array([pred_val])
+    # MagicMock invents any underscore attribute; pin the identity fields the
+    # API reads so they are real values (None run ID = no MLflow run).
+    mock._mlflow_model_name = "smart-home-energy-advisor"
+    mock._mlflow_model_version = "1"
+    mock._requested_model_version = "1"
+    mock._mlflow_run_id = None
     return mock
 
 

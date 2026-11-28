@@ -1,45 +1,195 @@
+# Smart Home Energy Advisor - complete MLOps stack
+#
+#   docker compose up --build -d      # start everything
+#   python scripts/preflight.py       # run BEFORE the first start (ports, files, Docker)
+#   python scripts/smoke_test.py      # run AFTER start (end-to-end verification)
+#
+# Startup order (enforced with depends_on):
+#   registry-init (one-shot) -> api -> monitor
+#                            -> mlflow-ui   -> prometheus -> grafana
+#
+# Shared state (named volumes, so no host path or permission issues):
+#   monitoring_store : SQLite monitoring DB. api and monitor mount it at the
+#                      SAME path and use the SAME MONITORING_DB_PATH, which is
+#                      the single source of truth for Grafana/Prometheus.
+#   mlflow_store     : MLflow tracking DB, model artifacts and the
+#                      deployment.json pointer (which version is serving).
+#
+# Every host port can be changed in .env (see .env.example) if something else
+# already owns it.
+
+x-monitoring-env: &monitoring-env
+  MONITORING_DB_PATH: /app/monitoring-store/predictions.db
+  MONITORING_SQLITE_SYNCHRONOUS: NORMAL
+
+x-mlflow-env: &mlflow-env
+  # Four slashes = absolute path inside the container.
+  MLFLOW_TRACKING_URI: sqlite:////app/mlflow-store/mlflow.db
+  MODEL_DEPLOYMENT_FILE: /app/mlflow-store/deployment.json
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+  # No usage telemetry leaves the stack (privacy; also avoids blocked-egress delays).
+  MLFLOW_DISABLE_TELEMETRY: "true"
+  DO_NOT_TRACK: "true"
+
 services:
+  # ─── One-shot: create/refresh the MLflow registry (v1 + candidate v2) ──
+  registry-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tools
+    image: smart-home-energy-advisor-tools:local
+    container_name: smart-home-energy-registry-init
+    restart: "no"
+    # Artifacts default to ./mlruns relative to the working directory, so run
+    # inside the shared volume to keep artifact paths valid for the API too.
+    working_dir: /app/mlflow-store
+    environment:
+      <<: *mlflow-env
+      # Lets git record the code revision from the read-only .git mount.
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /app
+    command: ["python", "/app/scripts/train_and_compare_model_versions.py"]
+    volumes:
+      - mlflow_store:/app/mlflow-store
+      - ./data/train.csv:/app/data/train.csv:ro
+      - ./data/test.csv:/app/data/test.csv:ro
+      - ./.git:/app/.git:ro
+    networks:
+      - energy_advisor_network
+
   # ─── FastAPI Inference Service ───────────────────────────────────────
   api:
     build:
       context: .
       dockerfile: Dockerfile
+      target: api
+    image: smart-home-energy-advisor:local
     container_name: smart-home-energy-api
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     environment:
-      - MONITORING_DB_PATH=/app/data/monitoring/predictions.db
-      - PYTHONUNBUFFERED=1
-      - MLFLOW_DISABLE_AGENT_HINT=1
+      <<: [*monitoring-env, *mlflow-env]
+      PYTHONUNBUFFERED: "1"
     volumes:
-      - ./data/monitoring:/app/data/monitoring
+      - monitoring_store:/app/monitoring-store
+      - mlflow_store:/app/mlflow-store
     networks:
       - energy_advisor_network
+    depends_on:
+      registry-init:
+        condition: service_completed_successfully
     healthcheck:
+      # /ready is 200 only when the model is loaded AND the monitoring DB works.
       test:
         - "CMD"
         - "python"
         - "-c"
-        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 15s
+      retries: 6
+      start_period: 20s
 
-  # ─── Prometheus Metrics Collector & Time-Series DB ─────────────────
+  # ─── Continuous drift / performance monitoring worker ────────────────
+  monitor:
+    image: smart-home-energy-advisor-tools:local
+    pull_policy: never  # reuse the image built for registry-init
+    container_name: smart-home-energy-monitor
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    environment:
+      <<: [*monitoring-env, *mlflow-env]
+    working_dir: /app
+    command:
+      - python
+      - scripts/run_continuous_monitoring_demo.py
+      - run
+      - --api-url
+      - http://api:8000
+      - --reference
+      - /app/data/train.csv
+      - --test
+      - /app/data/test.csv
+      - --db
+      - /app/monitoring-store/predictions.db
+      - --interval
+      - "${MONITOR_INTERVAL_SECONDS:-10}"
+      - --degradation-input
+      - "${MONITOR_DEGRADATION_INPUT:-sensor_drift}"
+      - --reports
+    volumes:
+      - monitoring_store:/app/monitoring-store
+      # Host bind mount: presenters run `set-scenario` on the host and read
+      # evidence (latest.json, Evidently HTML) without entering the container.
+      - ./reports/demo/continuous:/app/reports/demo/continuous
+      - ./data/train.csv:/app/data/train.csv:ro
+      - ./data/test.csv:/app/data/test.csv:ro
+    networks:
+      - energy_advisor_network
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # Healthy only while the worker keeps producing fresh cycle output.
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - >-
+          import os, sys, time;
+          p='/app/reports/demo/continuous/latest.json';
+          sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 180 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+  # ─── MLflow UI: experiments, runs, registered versions (read the shared store) ─
+  mlflow-ui:
+    image: smart-home-energy-advisor-tools:local
+    pull_policy: never
+    container_name: smart-home-energy-mlflow-ui
+    restart: unless-stopped
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    environment:
+      <<: *mlflow-env
+      MLFLOW_DISABLE_AGENT_HINT: "1"
+    command:
+      - mlflow
+      - ui
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --backend-store-uri
+      - sqlite:////app/mlflow-store/mlflow.db
+    volumes:
+      - mlflow_store:/app/mlflow-store
+    networks:
+      - energy_advisor_network
+    depends_on:
+      registry-init:
+        condition: service_completed_successfully
+
+  # ─── Prometheus Metrics Collector & Time-Series DB ───────────────────
   prometheus:
     image: prom/prometheus:v2.53.0
     container_name: smart-home-energy-prometheus
     restart: unless-stopped
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
       - "--web.console.libraries=/usr/share/prometheus/console_libraries"
       - "--web.console.templates=/usr/share/prometheus/consoles"
       - "--web.enable-lifecycle"
@@ -49,19 +199,22 @@ services:
       api:
         condition: service_healthy
 
-  # ─── Grafana Observability Dashboards ───────────────────────────────
+  # ─── Grafana Observability Dashboards ────────────────────────────────
   grafana:
     image: grafana/grafana:11.1.0
     container_name: smart-home-energy-grafana
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${GRAFANA_PORT:-3000}:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      GF_SECURITY_ADMIN_USER: admin
+      # Local demo default. Change in .env for anything shared (see governance).
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Anonymous users are read-only Viewers so evaluators can open the
+      # dashboard without credentials; only admin can edit.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
       - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
@@ -77,7 +230,7 @@ networks:
     driver: bridge
 
 volumes:
+  monitoring_store:
+  mlflow_store:
   prometheus_data:
-    driver: local
   grafana_data:
-    driver: local

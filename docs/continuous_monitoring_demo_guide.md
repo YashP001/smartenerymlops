@@ -169,20 +169,22 @@ Run Docker Desktop, open PowerShell, and use the repository root:
 ```powershell
 Set-Location 'E:\mlops phase 2\smart-home-energy-advisor'
 .venv\Scripts\python.exe scripts/run_continuous_monitoring_demo.py set-scenario normal
-docker compose -f docker-compose.yml -f docker-compose.demo.yml --profile continuous-monitoring up --build -d
-docker compose -f docker-compose.yml -f docker-compose.demo.yml --profile continuous-monitoring ps
-docker compose -f docker-compose.yml -f docker-compose.demo.yml logs -f monitor
+docker compose up --build -d
+docker compose ps
+docker compose logs -f monitor
 ```
 
-The opt-in override shares the dedicated Docker volume `monitoring_demo_data`
-between API and monitor. State and evidence files use `reports/demo/continuous` on
-the host. SQLite stays on Docker's Linux filesystem to avoid slow per-record I/O
-through a Windows bind mount. Their container paths differ, but an opaque store ID in
-the API `/metrics` header must match SQLite **before any inference writes**.
-It does not mount the normal host `data/monitoring` store. Historical CSV mounts are
-read only. The API uses the explicit local checkpoint, not MLflow registry loading.
+The stack shares the Docker volume `monitoring_store` between API and monitor, with
+the same container path and the same `MONITORING_DB_PATH`
+(`/app/monitoring-store/predictions.db`). State and evidence files use
+`reports/demo/continuous` on the host. SQLite stays on Docker's Linux filesystem to
+avoid slow per-record I/O through a Windows bind mount. An opaque store ID in the API
+`/metrics` header must match SQLite **before any inference writes**. The normal host
+`data/monitoring` store is never mounted. Historical CSV mounts are read only. The API
+serves the deployed MLflow registry version (v1 until promoted), bootstrapped by the
+one-shot `registry-init` service; `/ready` and every prediction report the version and run ID.
 
-The demo profile also opts into `MONITORING_SQLITE_SYNCHRONOUS=NORMAL` with WAL.
+The monitoring services opt into `MONITORING_SQLITE_SYNCHRONOUS=NORMAL` with WAL.
 Transactions remain consistent, but the latest commits may be lost on a
 power failure. The normal application keeps SQLite's default FULL setting. This
 is a local presentation performance choice, not a change to production defaults.
@@ -197,7 +199,7 @@ existing local labels. Use one mode at a time and a suitable dashboard time rang
 To return to the normal application without deleting either database or history:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.demo.yml stop monitor
+docker compose stop monitor
 docker compose -f docker-compose.yml up --build -d api prometheus grafana
 ```
 
@@ -227,7 +229,7 @@ In a second PowerShell terminal at the same repository root:
 # Wait for at least two cycles to show suppressed duplicates and increasing trigger counts.
 .venv\Scripts\python.exe scripts/run_continuous_monitoring_demo.py set-scenario recovery
 .venv\Scripts\python.exe scripts/run_continuous_monitoring_demo.py status
-docker compose -f docker-compose.yml -f docker-compose.demo.yml exec monitor python scripts/run_continuous_monitoring_demo.py history --db /app/demo-monitoring/predictions.db
+docker compose exec monitor python scripts/run_continuous_monitoring_demo.py history --db /app/monitoring-store/predictions.db
 ```
 
 Each command affects the next cycle. Wait for a completed cycle, then a Prometheus
@@ -260,8 +262,8 @@ monitor against the same store. To run the automatic workflow against the Docker
 API, use a one-off controller with access to its Linux database volume:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.demo.yml stop monitor
-docker compose -f docker-compose.yml -f docker-compose.demo.yml run --rm --no-deps monitor python scripts/run_continuous_monitoring_demo.py run --api-url http://api:8000 --reference /app/demo-data/train.csv --test /app/demo-data/test.csv --db /app/demo-monitoring/predictions.db --degradation-input sensor_drift --automatic --cycles 20 --interval 20
+docker compose stop monitor
+docker compose run --rm --no-deps monitor python scripts/run_continuous_monitoring_demo.py run --api-url http://api:8000 --reference /app/data/train.csv --test /app/data/test.csv --db /app/monitoring-store/predictions.db --degradation-input sensor_drift --automatic --cycles 20 --interval 20
 ```
 
 For native API serving instead of Docker, terminal A:
@@ -298,7 +300,7 @@ The default fast loop uses the existing statistical detector and JSON summaries.
 Graceful container stop:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.demo.yml stop monitor
+docker compose stop monitor
 ```
 
 ## Dashboard metrics and verification

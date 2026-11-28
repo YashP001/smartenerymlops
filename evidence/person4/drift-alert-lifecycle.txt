@@ -1,0 +1,5 @@
+SMART HOME ENERGY ADVISOR - PERSON 4
+HVAC DATA DRIFT ALERT LIFECYCLE VERIFICATION
+Date: 28 November 2026
+
+{'alert_id': 'alert_drift_4a3820df54', 'alert_type': 'data_drift', 'severity': 'CRITICAL', 'status': 'resolved', 'message': 'Data drift detected: 3 feature(s) drifted (50.0% share >= 50.0% threshold). Drifted features: [energy_current_hour, energy_previous_hour, energy_two_hours_ago].', 'created_at': '2026-11-28T06:27:22.018817+00:00', 'updated_at': '2026-11-28T07:18:30.011803+00:00', 'resolved_at': '2026-11-28T07:18:30.011803+00:00'}

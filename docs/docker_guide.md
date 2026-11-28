@@ -1,5 +1,7 @@
 # Docker Containerization Guide (Member 4)
 
+> **Scope of this guide:** building and running the inference API image on its own. To run the complete stack (API, monitoring worker, MLflow, Prometheus, Grafana) use `docker compose` as described in [deployment_runbook.md](deployment_runbook.md). Note: a bare `docker run` of the API image has no MLflow registry, so it serves the bundled local model (`model_version: "local"`).
+
 This guide documents the containerization and local deployment workflow for the **AI-Assisted Smart Home Energy Advisor** inference service.
 
 ---
@@ -47,7 +49,7 @@ The containerized service relies on the registry-first loading pipeline defined 
 ### Step 1: Build the Docker Image
 From the repository root directory in PowerShell:
 ```powershell
-docker build -t smart-home-energy-advisor .
+docker build --target api -t smart-home-energy-advisor .
 ```
 
 ### Step 2: Run the Docker Container

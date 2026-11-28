@@ -143,13 +143,13 @@ def test_api_and_collector_share_database_and_scenario_updates(demo_files, monke
         assert degraded["performance_result"]["status"] == "degraded"
         payload = client.get("/metrics")
         assert payload.headers["X-Monitoring-Store-ID"] == get_store_id(str(demo_files["db_path"]))
-        assert 'energy_advisor_model_bias_kwh{model_version="ReplayModel"}' in payload.text
+        assert 'energy_advisor_model_bias_kwh{model_version="local"}' in payload.text
         assert 'energy_advisor_monitoring_scenario_info{scenario="model_degradation"} 1.0' in payload.text
         assert 'energy_advisor_active_alerts_total 1.0' in payload.text
         controller.run_cycle("recovery")
         payload = client.get("/metrics").text
         assert 'energy_advisor_monitoring_scenario_info{scenario="recovery"} 1.0' in payload
-        assert 'energy_advisor_model_r2{model_version="ReplayModel"}' in payload
+        assert 'energy_advisor_model_r2{model_version="local"}' in payload
         assert 'energy_advisor_active_alerts_total 0.0' in payload
 
 

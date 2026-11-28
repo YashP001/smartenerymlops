@@ -81,7 +81,7 @@ New files:
 - `src/monitoring/demo_controller.py`: fresh-batch ingestion, provenance, scenario
   switching, bounded assessments, and interruptible loop.
 - `scripts/run_continuous_monitoring_demo.py`: CLI `run`, `set-scenario`, and `status`.
-- `docker-compose.demo.yml`: optional isolated live presentation stack.
+- `docker-compose.yml`: the full stack, including the `monitor` worker and shared `monitoring_store` volume (the former `docker-compose.demo.yml` override was merged into it by Person 4).
 - `tests/test_continuous_monitoring_demo.py`: portable temporary-store tests.
 - `tests/conftest.py`: final-review addition isolating the default monitoring store
   for all tests, including older API/metrics tests.
@@ -239,7 +239,7 @@ See the [guide](continuous_monitoring_demo_guide.md) for all Windows commands an
 troubleshooting. Core startup:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.demo.yml --profile continuous-monitoring up --build -d
+docker compose up --build -d
 .venv\Scripts\python.exe scripts/run_continuous_monitoring_demo.py set-scenario normal
 .venv\Scripts\python.exe scripts/run_continuous_monitoring_demo.py set-scenario hvac_shift
 .venv\Scripts\python.exe scripts/run_continuous_monitoring_demo.py set-scenario sensor_drift
@@ -286,7 +286,7 @@ To resume fresh monitoring after reviewing the changes:
 
 ```powershell
 .venv\Scripts\python.exe scripts/run_continuous_monitoring_demo.py set-scenario normal
-docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --no-deps monitor
+docker compose up -d --no-deps monitor
 ```
 
 For a fresh build/start, use the full command in the guide. Existing alert and
@@ -320,7 +320,7 @@ logs, and evidence are ignored; none are among the 17 recommended commit files.
 ### 3. Demonstration data isolation
 
 Expanded Compose configuration confirms the demo API replaces the normal host
-database bind mount with the dedicated `monitoring_demo_data` volume. The monitor
+database bind mount with the dedicated `monitoring_store` volume. The monitor
 opens the same volume at a different container path and verifies its opaque identity
 before POST requests. Evidence/state files stay under ignored `reports/demo/`;
 reference/test CSV mounts are read only. The normal database and historical data

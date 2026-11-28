@@ -339,6 +339,11 @@ def run_end_to_end_demo(
                 "Feedback values will be derived from model predictions with Gaussian noise (+/- 0.015 kWh)."
             )
 
+        # The monitoring store keys records by the identity the API reports
+        # (registry version, or "local" for the bundled fallback), not by the
+        # estimator class name, so downstream evaluation must use that value.
+        stored_model_version = model_name
+
         logged_prediction_ids: List[str] = []
         actual_ground_truths: List[float] = []
         predicted_values: List[float] = []
@@ -360,6 +365,7 @@ def run_end_to_end_demo(
 
             pred_id = pred_resp.get("prediction_id")
             pred_kwh = pred_resp.get("predicted_energy_kwh")
+            stored_model_version = str(pred_resp.get("model_version") or model_name)
             logged_prediction_ids.append(pred_id)
             predicted_values.append(pred_kwh)
 
@@ -539,7 +545,7 @@ def run_end_to_end_demo(
         print_step(7, "Evaluate Model Operational Performance against Baselines")
         perf_summary = evaluate_model_performance(
             db_path=active_db,
-            model_version=model_name,
+            model_version=stored_model_version,
         )
         perf_metrics = perf_summary.get("metrics", {})
         obs_mae = perf_metrics.get("mae", 0.0)
@@ -601,7 +607,7 @@ def run_end_to_end_demo(
             ref_data=DEFAULT_REF_PATH,
             prod_data=csv_normal,
             db_path=active_db,
-            model_version=model_name,
+            model_version=stored_model_version,
             alert_manager=alert_mgr,
             save_reports=True,
             output_dir=os.path.join(demo_root, "performance"),
@@ -673,7 +679,7 @@ def run_end_to_end_demo(
                 ref_data=DEFAULT_REF_PATH,
                 prod_data=csv_hvac,
                 db_path=active_db,
-                model_version=model_name,
+                model_version=stored_model_version,
                 alert_manager=alert_mgr,
             )
             hvac_drift_share = hvac_cycle.get("drift_result", {}).get("drift_share", 0.0)
@@ -711,7 +717,7 @@ def run_end_to_end_demo(
                 ref_data=DEFAULT_REF_PATH,
                 prod_data=csv_sensor,
                 db_path=active_db,
-                model_version=model_name,
+                model_version=stored_model_version,
                 alert_manager=alert_mgr,
             )
             sensor_drift_share = sensor_cycle.get("drift_result", {}).get("drift_share", 0.0)
@@ -729,7 +735,7 @@ def run_end_to_end_demo(
                 ref_data=DEFAULT_REF_PATH,
                 prod_data=csv_normal,
                 db_path=active_db,
-                model_version=model_name,
+                model_version=stored_model_version,
                 alert_manager=alert_mgr,
             )
             resolved_alerts = recovery_cycle.get("alerts_resolved", [])

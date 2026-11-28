@@ -47,8 +47,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Validate Docker Compose configuration
+        run: docker compose config -q
+
       - name: Build Docker image
         run: docker build -t smart-home-energy-advisor:latest .
+
+      - name: Build monitoring/tools image
+        run: docker build --target tools -t smart-home-energy-advisor-tools:latest .
 
       - name: Verify Docker image
         run: docker image inspect smart-home-energy-advisor:latest

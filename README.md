@@ -231,26 +231,33 @@ python scripts/run_end_to_end_demo.py --api-url http://127.0.0.1:8000 --samples 
 
 ---
 
-## 7. Prometheus & Grafana Observability
+## 7. Full MLOps Stack (Docker): API, Monitoring, MLflow, Prometheus, Grafana
 
-When running on Docker-enabled infrastructure, full containerized observability is available:
+One command starts the whole system. From a fresh clone:
 
 ```bash
-# Start all microservices in the background
-docker-compose up -d
-
-# Verify container statuses
-docker-compose ps
+python scripts/preflight.py          # checks Docker, required files, and that ports are free
+docker compose up --build -d         # registry-init -> api -> monitor, mlflow-ui -> prometheus -> grafana
+python scripts/smoke_test.py         # end-to-end verification; must end with "0 failed"
 ```
 
-### Access URLs:
-- **FastAPI Inference Service:** [http://localhost:8000](http://localhost:8000)
+### Access URLs (host ports are configurable in `.env`, see `.env.example`):
+- **FastAPI Inference Service:** [http://localhost:8000](http://localhost:8000) (`/docs`, `/ready`, `/metrics`)
+- **MLflow UI (experiments, registered versions):** [http://localhost:5000](http://localhost:5000)
 - **Prometheus UI:** [http://localhost:9090](http://localhost:9090)
   - Verify target `api:8000` is active under **Status -> Targets**.
   - Query metrics such as `energy_advisor_dataset_drift_share` or `energy_advisor_model_mae`.
 - **Grafana Dashboard:** [http://localhost:3000](http://localhost:3000)
-  - Auto-provisions the Prometheus datasource and the **Smart Home Energy Advisor - MLOps Operations** dashboard.
-  - Features real-time visual panels for API traffic, inference latency percentiles, feature drift shares, model performance degradation, and active alert state counters.
+  - Auto-provisions the Prometheus datasource and the MLOps dashboard.
+  - Real-time panels for API traffic, inference latency percentiles, feature drift shares, model performance degradation, and active alert state counters.
+
+The API and the continuous monitoring worker share one monitoring database (a Docker volume),
+and the API serves the deployed MLflow registry version, so every prediction carries its
+`model_version` and `model_run_id`.
+
+- **Start, demonstrate, reset, troubleshoot (including port conflicts and Render):** [Deployment Runbook](docs/deployment_runbook.md)
+- **Owners, approval criteria, access, privacy, retention, audit trail, incident response, rollback authority:** [Governance](docs/governance.md)
+- **Model versions and the promote/rollback lifecycle:** [Model Lifecycle Guide](docs/model_lifecycle_guide.md)
 
 For complete metrics definitions and PromQL queries, see the [Observability Guide](docs/observability_guide.md).
 
@@ -258,7 +265,7 @@ For complete metrics definitions and PromQL queries, see the [Observability Guid
 
 ## 8. Automated Testing
 
-The repository contains a test suite of **323 automated tests** covering data validation, feature engineering, model training, MLflow tracking, database persistence, drift detection, performance monitoring, alert lifecycle management, Prometheus exposition, and end-to-end integration.
+The repository contains a test suite of **333 automated tests** covering data validation, feature engineering, model training, MLflow tracking, database persistence, drift detection, performance monitoring, alert lifecycle management, Prometheus exposition, and end-to-end integration.
 
 Run the full test suite:
 
@@ -270,6 +277,7 @@ Run the full test suite:
 - `tests/test_data_validation.py`: Raw 3-minute schema, missing values, timestamp intervals, and CEEW daily aggregation parity.
 - `tests/test_features.py`: Hourly aggregation, lag sequence continuity, calendar features, and target formulation.
 - `tests/test_model.py`: Model benchmarks, chronological train/val/test evaluation, and scikit-learn interfaces.
+- `tests/test_deployment_config.py`: guards the Docker wiring (shared monitoring DB, registry store, ports, dependency pins).
 - `tests/test_experiment_tracking.py`: MLflow run logging, metric calculation, artifact persistence, and Model Registry staging.
 - `tests/test_api.py`: FastAPI `/health`, `/predict`, input schema validation, and background logging.
 - `tests/test_monitoring.py`: SQLite persistence, schema constraints, record pairing, and feedback validation.
